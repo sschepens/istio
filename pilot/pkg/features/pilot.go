@@ -679,6 +679,9 @@ var (
 	// User should not rely on builtin resource labels, this flag will be removed in future releases(1.20).
 	EnableOTELBuiltinResourceLables = env.Register("ENABLE_OTEL_BUILTIN_RESOURCE_LABELS", false,
 		"If enabled, envoy will send builtin lables(e.g. node_name) via OTel sink.").Get()
+
+	EnableLazySidecarEvaluation = env.Register("ENABLE_LAZY_SIDECAR_EVALUATION", true,
+		"If enabled, pilot will only evaluate sidecar resources when actually used").Get()
 )
 
 // UnsafeFeaturesEnabled returns true if any unsafe features are enabled.

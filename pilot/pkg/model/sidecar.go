@@ -18,10 +18,12 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	networking "istio.io/api/networking/v1alpha3"
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
@@ -120,6 +122,11 @@ type SidecarScope struct {
 	//
 	// Changes to Sidecar resources in this namespace will trigger a push.
 	RootNamespace string
+
+	// Function that will initialize the sidecar scope. This is used to
+	// defer the initialization of the sidecar scope until the first time
+	// it is used
+	initFunc func()
 }
 
 // MarshalJSON implements json.Marshaller
@@ -275,20 +282,32 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 		Namespace: sidecarConfig.Namespace,
 	}.HashCode())
 
-	egressConfigs := sidecar.Egress
+	if !features.EnableLazySidecarEvaluation {
+		initSidecarScope(ps, out, configNamespace)
+	} else {
+		out.initFunc = sync.OnceFunc(func() {
+			initSidecarScope(ps, out, configNamespace)
+		})
+	}
+
+	return out
+}
+
+func initSidecarScope(ps *PushContext, sidecarScope *SidecarScope, configNamespace string) {
+	egressConfigs := sidecarScope.Sidecar.Egress
 	// If egress not set, setup a default listener
 	if len(egressConfigs) == 0 {
 		egressConfigs = append(egressConfigs, &networking.IstioEgressListener{Hosts: []string{"*/*"}})
 	}
-	out.EgressListeners = make([]*IstioEgressListenerWrapper, 0, len(egressConfigs))
+	sidecarScope.EgressListeners = make([]*IstioEgressListenerWrapper, 0, len(egressConfigs))
 	for _, e := range egressConfigs {
-		out.EgressListeners = append(out.EgressListeners,
+		sidecarScope.EgressListeners = append(sidecarScope.EgressListeners,
 			convertIstioListenerToWrapper(ps, configNamespace, e))
 	}
 
 	// Now collect all the imported services across all egress listeners in
 	// this sidecar crd. This is needed to generate CDS output
-	out.services = make([]*Service, 0)
+	sidecarScope.services = make([]*Service, 0)
 	type serviceIndex struct {
 		svc   *Service
 		index int // index record the position of the svc in slice
@@ -299,13 +318,13 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 			return
 		}
 		if foundSvc, found := servicesAdded[s.Hostname]; !found {
-			out.AddConfigDependencies(ConfigKey{
+			sidecarScope.AddConfigDependencies(ConfigKey{
 				Kind:      kind.ServiceEntry,
 				Name:      string(s.Hostname),
 				Namespace: s.Attributes.Namespace,
 			}.HashCode())
-			out.services = append(out.services, s)
-			servicesAdded[s.Hostname] = serviceIndex{s, len(out.services) - 1}
+			sidecarScope.services = append(sidecarScope.services, s)
+			servicesAdded[s.Hostname] = serviceIndex{s, len(sidecarScope.services) - 1}
 		} else if foundSvc.svc.Attributes.Namespace == s.Attributes.Namespace && len(s.Ports) > 0 {
 			// merge the ports to service when each listener generates partial service
 			// we only merge if the found service is in the same namespace as the one we're trying to add
@@ -323,14 +342,14 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 				}
 			}
 			// replace service in slice
-			out.services[foundSvc.index] = copied
+			sidecarScope.services[foundSvc.index] = copied
 			// Update index as well, so that future reads will merge into the new service
 			foundSvc.svc = copied
 			servicesAdded[foundSvc.svc.Hostname] = foundSvc
 		}
 	}
 
-	for _, listener := range out.EgressListeners {
+	for _, listener := range sidecarScope.EgressListeners {
 		// First add the explicitly requested services, which take priority
 		for _, s := range listener.services {
 			addService(s)
@@ -338,7 +357,7 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 		// add dependencies on delegate virtual services
 		delegates := ps.DelegateVirtualServices(listener.virtualServices)
 		for _, delegate := range delegates {
-			out.AddConfigDependencies(delegate)
+			sidecarScope.AddConfigDependencies(delegate)
 		}
 
 		matchPort := needsPortMatch(listener)
@@ -348,7 +367,7 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 		// want in the hosts field, and the potentially random choice below won't matter
 		for _, vs := range listener.virtualServices {
 			for _, cfg := range VirtualServiceDependencies(vs) {
-				out.AddConfigDependencies(cfg.HashCode())
+				sidecarScope.AddConfigDependencies(cfg.HashCode())
 			}
 
 			v := vs.Spec.(*networking.VirtualService)
@@ -405,39 +424,37 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 	// Now that we have all the services that sidecars using this scope (in
 	// this config namespace) will see, identify all the destinationRules
 	// that these services need
-	out.servicesByHostname = make(map[host.Name]*Service, len(out.services))
-	out.destinationRules = make(map[host.Name][]*ConsolidatedDestRule)
-	out.destinationRulesByNames = make(map[types.NamespacedName]*config.Config)
-	for _, s := range out.services {
-		out.servicesByHostname[s.Hostname] = s
+	sidecarScope.servicesByHostname = make(map[host.Name]*Service, len(sidecarScope.services))
+	sidecarScope.destinationRules = make(map[host.Name][]*ConsolidatedDestRule)
+	sidecarScope.destinationRulesByNames = make(map[types.NamespacedName]*config.Config)
+	for _, s := range sidecarScope.services {
+		sidecarScope.servicesByHostname[s.Hostname] = s
 		drList := ps.destinationRule(configNamespace, s)
 		if drList != nil {
-			out.destinationRules[s.Hostname] = drList
+			sidecarScope.destinationRules[s.Hostname] = drList
 			for _, dr := range drList {
 				for _, key := range dr.from {
-					out.AddConfigDependencies(ConfigKey{
+					sidecarScope.AddConfigDependencies(ConfigKey{
 						Kind:      kind.DestinationRule,
 						Name:      key.Name,
 						Namespace: key.Namespace,
 					}.HashCode())
 
-					out.destinationRulesByNames[key] = dr.rule
+					sidecarScope.destinationRulesByNames[key] = dr.rule
 				}
 			}
 		}
 	}
 
-	if sidecar.OutboundTrafficPolicy == nil {
+	if sidecarScope.Sidecar.OutboundTrafficPolicy == nil {
 		if ps.Mesh.OutboundTrafficPolicy != nil {
-			out.OutboundTrafficPolicy = &networking.OutboundTrafficPolicy{
+			sidecarScope.OutboundTrafficPolicy = &networking.OutboundTrafficPolicy{
 				Mode: networking.OutboundTrafficPolicy_Mode(ps.Mesh.OutboundTrafficPolicy.Mode),
 			}
 		}
 	} else {
-		out.OutboundTrafficPolicy = sidecar.OutboundTrafficPolicy
+		sidecarScope.OutboundTrafficPolicy = sidecarScope.Sidecar.OutboundTrafficPolicy
 	}
-
-	return out
 }
 
 func convertIstioListenerToWrapper(ps *PushContext, configNamespace string,
