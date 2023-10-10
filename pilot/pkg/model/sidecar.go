@@ -281,17 +281,18 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 	}.HashCode())
 
 	if !features.EnableLazySidecarEvaluation {
-		initSidecarScope(ps, out, configNamespace)
+		initSidecarScopeInternalIndexes(ps, out, configNamespace)
 	} else {
 		out.initFunc = sync.OnceFunc(func() {
-			initSidecarScope(ps, out, configNamespace)
+			initSidecarScopeInternalIndexes(ps, out, configNamespace)
 		})
 	}
 
 	return out
 }
 
-func initSidecarScope(ps *PushContext, sidecarScope *SidecarScope, configNamespace string) {
+// initSidecarScopeInternalIndexes initializes SidecarScope's internal indexes derived from PushContext
+func initSidecarScopeInternalIndexes(ps *PushContext, sidecarScope *SidecarScope, configNamespace string) {
 	egressConfigs := sidecarScope.Sidecar.Egress
 	// If egress not set, setup a default listener
 	if len(egressConfigs) == 0 {
