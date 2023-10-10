@@ -774,7 +774,7 @@ var (
 			"This flag is added for backwards compatibility only and will be removed in future releases").Get()
 
 	EnableLazySidecarEvaluation = env.Register("ENABLE_LAZY_SIDECAR_EVALUATION", true,
-		"If enabled, pilot will only evaluate sidecar resources when actually used").Get()
+		"If enabled, pilot will only compute sidecar resources when actually used").Get()
 )
 
 // EnableEndpointSliceController returns the value of the feature flag and whether it was actually specified.
