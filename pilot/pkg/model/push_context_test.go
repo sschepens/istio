@@ -1480,6 +1480,14 @@ func TestInitPushContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	for _, sidecars := range old.sidecarIndex.sidecarsByNamespace {
+		for _, sidecar := range sidecars {
+			if sidecar.initFunc != nil {
+				sidecar.initFunc()
+			}
+		}
+	}
+
 	// Create a new one, copying from the old one
 	// Pass a ConfigsUpdated otherwise we would just copy it directly
 	newPush := NewPushContext()
@@ -1489,6 +1497,14 @@ func TestInitPushContext(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatal(err)
+	}
+
+	for _, sidecars := range newPush.sidecarIndex.sidecarsByNamespace {
+		for _, sidecar := range sidecars {
+			if sidecar.initFunc != nil {
+				sidecar.initFunc()
+			}
+		}
 	}
 
 	// Check to ensure the update is identical to the old one
