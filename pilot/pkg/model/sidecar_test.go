@@ -1997,7 +1997,7 @@ func TestCreateSidecarScope(t *testing.T) {
 
 			sidecarConfig := tt.sidecarConfig
 			sidecarScope := ConvertToSidecarScope(ps, sidecarConfig, "mynamespace")
-			if features.EnableLazySidecarEvaluation && sidecarScope.initFunc != nil {
+			if features.EnableLazySidecarEvaluation {
 				sidecarScope.initFunc()
 			}
 			configuredListeneres := 1
@@ -2271,7 +2271,7 @@ func TestContainsEgressDependencies(t *testing.T) {
 			ps.virtualServiceIndex.publicByGateway[constants.IstioMeshGateway] = append(ps.virtualServiceIndex.publicByGateway[constants.IstioMeshGateway], virtualServices...)
 			ps.setDestinationRules(destinationRules)
 			sidecarScope := ConvertToSidecarScope(ps, cfg, "default")
-			if features.EnableLazySidecarEvaluation && sidecarScope.initFunc != nil {
+			if features.EnableLazySidecarEvaluation {
 				sidecarScope.initFunc()
 			}
 			if len(tt.egress) == 0 {
@@ -2333,7 +2333,7 @@ func TestRootNsSidecarDependencies(t *testing.T) {
 			meshConfig := mesh.DefaultMeshConfig()
 			ps.Mesh = meshConfig
 			sidecarScope := ConvertToSidecarScope(ps, cfg, "default")
-			if features.EnableLazySidecarEvaluation && sidecarScope.initFunc != nil {
+			if features.EnableLazySidecarEvaluation {
 				sidecarScope.initFunc()
 			}
 			if len(tt.egress) == 0 {
@@ -2472,7 +2472,7 @@ outboundTrafficPolicy:
 				sidecarScope = ConvertToSidecarScope(ps, test.sidecar, test.sidecar.Namespace)
 			}
 
-			if features.EnableLazySidecarEvaluation && sidecarScope.initFunc != nil {
+			if features.EnableLazySidecarEvaluation {
 				sidecarScope.initFunc()
 			}
 
