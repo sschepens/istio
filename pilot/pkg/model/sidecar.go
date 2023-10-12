@@ -123,6 +123,7 @@ type SidecarScope struct {
 	// Function that will initialize the sidecar scope. This is used to
 	// defer the initialization of the sidecar scope until the first time
 	// it is used
+	once     sync.Once
 	initFunc func()
 }
 
@@ -282,9 +283,11 @@ func ConvertToSidecarScope(ps *PushContext, sidecarConfig *config.Config, config
 		Namespace: sidecarConfig.Namespace,
 	}.HashCode())
 
-	out.initFunc = sync.OnceFunc(func() {
-		initSidecarScopeInternalIndexes(ps, out, configNamespace)
-	})
+	out.initFunc = func() {
+		out.once.Do(func() {
+			initSidecarScopeInternalIndexes(ps, out, configNamespace)
+		})
+	}
 
 	if !features.EnableLazySidecarEvaluation {
 		out.initFunc()
