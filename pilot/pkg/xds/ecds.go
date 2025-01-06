@@ -38,13 +38,9 @@ type EcdsGenerator struct {
 
 var _ model.XdsResourceGenerator = &EcdsGenerator{}
 
-func ecdsNeedsPush(req *model.PushRequest) bool {
-	if req == nil {
-		return true
-	}
-	// If none set, we will always push
-	if len(req.ConfigsUpdated) == 0 {
-		return true
+func ecdsNeedsPush(req *model.PushRequest, proxy *model.Proxy) bool {
+	if res, ok := xdsNeedsPush(req, proxy); ok {
+		return res
 	}
 	// Only push if config updates is triggered by EnvoyFilter, WasmPlugin, or Secret.
 	for config := range req.ConfigsUpdated {
@@ -80,7 +76,7 @@ func onlyReferencedConfigsUpdated(req *model.PushRequest) bool {
 
 // Generate returns ECDS resources for a given proxy.
 func (e *EcdsGenerator) Generate(proxy *model.Proxy, w *model.WatchedResource, req *model.PushRequest) (model.Resources, model.XdsLogDetails, error) {
-	if !ecdsNeedsPush(req) {
+	if !ecdsNeedsPush(req, proxy) {
 		return nil, model.DefaultXdsLogDetails, nil
 	}
 
