@@ -112,7 +112,7 @@ func TestGenerateSDS(t *testing.T) {
 			name:      "simple",
 			proxy:     &model.Proxy{VerifiedIdentity: &spiffe.Identity{Namespace: "istio-system"}, Type: model.Router},
 			resources: []string{"kubernetes://generic"},
-			request:   &model.PushRequest{Full: true},
+			request:   &model.PushRequest{Full: true, Forced: true},
 			expect: map[string]Expected{
 				"kubernetes://generic": {
 					Key:  string(genericCert.Data[credentials.GenericScrtKey]),
@@ -124,7 +124,7 @@ func TestGenerateSDS(t *testing.T) {
 			name:      "sidecar",
 			proxy:     &model.Proxy{VerifiedIdentity: &spiffe.Identity{Namespace: "istio-system"}},
 			resources: []string{"kubernetes://generic"},
-			request:   &model.PushRequest{Full: true},
+			request:   &model.PushRequest{Full: true, Forced: true},
 			expect: map[string]Expected{
 				"kubernetes://generic": {
 					Key:  string(genericCert.Data[credentials.GenericScrtKey]),
@@ -136,14 +136,14 @@ func TestGenerateSDS(t *testing.T) {
 			name:      "unauthenticated",
 			proxy:     &model.Proxy{Type: model.Router},
 			resources: []string{"kubernetes://generic"},
-			request:   &model.PushRequest{Full: true},
+			request:   &model.PushRequest{Full: true, Forced: true},
 			expect:    map[string]Expected{},
 		},
 		{
 			name:      "multiple",
 			proxy:     &model.Proxy{VerifiedIdentity: &spiffe.Identity{Namespace: "istio-system"}, Type: model.Router},
 			resources: allResources,
-			request:   &model.PushRequest{Full: true},
+			request:   &model.PushRequest{Full: true, Forced: true},
 			expect: map[string]Expected{
 				"kubernetes://generic": {
 					Key:  string(genericCert.Data[credentials.GenericScrtKey]),
@@ -286,7 +286,7 @@ func TestGenerateSDS(t *testing.T) {
 			name:      "unknown",
 			proxy:     &model.Proxy{VerifiedIdentity: &spiffe.Identity{Namespace: "istio-system"}, Type: model.Router},
 			resources: []string{"kubernetes://generic", "foo://invalid", "kubernetes://not-found", "default", "builtin://"},
-			request:   &model.PushRequest{Full: true},
+			request:   &model.PushRequest{Full: true, Forced: true},
 			expect: map[string]Expected{
 				"kubernetes://generic": {
 					Key:  string(genericCert.Data[credentials.GenericScrtKey]),
@@ -299,7 +299,7 @@ func TestGenerateSDS(t *testing.T) {
 			name:      "unauthorized",
 			proxy:     &model.Proxy{VerifiedIdentity: &spiffe.Identity{Namespace: "istio-system"}, Type: model.Router},
 			resources: []string{"kubernetes://generic"},
-			request:   &model.PushRequest{Full: true},
+			request:   &model.PushRequest{Full: true, Forced: true},
 			// Should get a response, but it will be empty
 			expect: map[string]Expected{},
 			accessReviewResponse: func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -360,7 +360,7 @@ func TestCaching(t *testing.T) {
 	})
 	gen := s.Discovery.Generators[v3.SecretType]
 
-	fullPush := &model.PushRequest{Full: true, Start: time.Now()}
+	fullPush := &model.PushRequest{Full: true, Start: time.Now(), Forced: true}
 	istiosystem := &model.Proxy{
 		Metadata:         &model.NodeMetadata{ClusterID: constants.DefaultClusterName},
 		VerifiedIdentity: &spiffe.Identity{Namespace: "istio-system"},
@@ -421,7 +421,7 @@ func TestPrivateKeyProviderProxyConfig(t *testing.T) {
 		},
 	})
 	gen := s.Discovery.Generators[v3.SecretType]
-	fullPush := &model.PushRequest{Full: true, Start: time.Now()}
+	fullPush := &model.PushRequest{Full: true, Start: time.Now(), Forced: true}
 	secrets, _, _ := gen.Generate(s.SetupProxy(rawProxy), &model.WatchedResource{ResourceNames: []string{"kubernetes://generic"}}, fullPush)
 	raw := xdstest.ExtractTLSSecrets(t, model.ResourcesToAny(secrets))
 	for _, scrt := range raw {

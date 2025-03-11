@@ -218,7 +218,7 @@ func (s *DiscoveryServer) processRequest(req *discovery.DiscoveryRequest, con *C
 	if strings.HasPrefix(req.TypeUrl, v3.DebugType) {
 		return s.pushXds(con,
 			&model.WatchedResource{TypeUrl: req.TypeUrl, ResourceNames: req.ResourceNames},
-			&model.PushRequest{Full: true, Push: con.proxy.LastPushContext})
+			&model.PushRequest{Full: true, Push: con.proxy.LastPushContext, Forced: true})
 	}
 
 	if s.StatusReporter != nil {
@@ -238,8 +238,9 @@ func (s *DiscoveryServer) processRequest(req *discovery.DiscoveryRequest, con *C
 		// The usage of LastPushTime (rather than time.Now()), is critical here for correctness; This time
 		// is used by the XDS cache to determine if a entry is stale. If we use Now() with an old push context,
 		// we may end up overriding active cache entries with stale ones.
-		Start: con.proxy.LastPushTime,
-		Delta: delta,
+		Start:  con.proxy.LastPushTime,
+		Delta:  delta,
+		Forced: true,
 	}
 
 	// SidecarScope for the proxy may not have been updated based on this pushContext.
@@ -651,7 +652,7 @@ func (s *DiscoveryServer) computeProxyState(proxy *model.Proxy, request *model.P
 	var shouldResetGateway, shouldResetSidecarScope bool
 	// 1. If request == nil(initiation phase) or request.ConfigsUpdated == nil(global push), set proxy serviceTargets.
 	// 2. otherwise only set when svc update, this is for the case that a service may select the proxy
-	if request == nil || len(request.ConfigsUpdated) == 0 ||
+	if request == nil || request.Forced ||
 		proxy.ShouldUpdateServiceTargets(request.ConfigsUpdated) {
 		proxy.SetServiceTargets(s.Env.ServiceDiscovery)
 		// proxy.SetGatewaysForProxy depends on the serviceTargets,
@@ -676,7 +677,7 @@ func (s *DiscoveryServer) computeProxyState(proxy *model.Proxy, request *model.P
 		shouldResetSidecarScope = true
 	} else {
 		push = request.Push
-		if len(request.ConfigsUpdated) == 0 {
+		if request.Forced {
 			shouldResetSidecarScope = true
 		}
 		for conf := range request.ConfigsUpdated {
@@ -805,6 +806,7 @@ func (s *DiscoveryServer) ProxyUpdate(clusterID cluster.ID, ip string) {
 		Push:   s.globalPushContext(),
 		Start:  time.Now(),
 		Reason: model.NewReasonStats(model.ProxyUpdate),
+		Forced: true,
 	})
 }
 
@@ -815,6 +817,7 @@ func AdsPushAll(s *DiscoveryServer) {
 		Full:   true,
 		Push:   s.globalPushContext(),
 		Reason: model.NewReasonStats(model.DebugTrigger),
+		Forced: true,
 	})
 }
 

@@ -81,7 +81,7 @@ func TestAdsReconnectRequests(t *testing.T) {
 	eres := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{TypeUrl: v3.EndpointType, ResourceNames: []string{"my-resource"}})
 
 	// A push should get a response for both
-	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true})
+	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true, Forced: true})
 	ads.ExpectResponse(t)
 	ads.ExpectResponse(t)
 	// Close the connection and reconnect
@@ -786,7 +786,7 @@ func TestAdsUpdate(t *testing.T) {
 			Namespace: "default",
 		},
 	})
-	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true})
+	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true, Forced: true})
 	time.Sleep(time.Millisecond * 200)
 	s.MemRegistry.SetEndpoints("adsupdate.default.svc.cluster.local", "default",
 		newEndpointWithAccount("10.2.0.1", "hello-sa", "v1"))
@@ -981,7 +981,7 @@ func TestPushQueueLeak(t *testing.T) {
 	for _, c := range ds.Discovery.AllClients() {
 		leak.MustGarbageCollect(t, c)
 	}
-	ds.Discovery.AdsPushAll(&model.PushRequest{Push: ds.PushContext()})
+	ds.Discovery.AdsPushAll(&model.PushRequest{Push: ds.PushContext(), Forced: true})
 	p.Cleanup()
 }
 
@@ -1010,7 +1010,7 @@ func TestDistribution(t *testing.T) {
 	expectNonce(res1.Nonce, v3.ClusterType)
 
 	// Send a push
-	s.Discovery.Push(&model.PushRequest{Full: true, Push: s.Env().PushContext()})
+	s.Discovery.Push(&model.PushRequest{Full: true, Push: s.Env().PushContext(), Forced: true})
 	res := ads.ExpectResponse(t)
 	// Not yet ACKed, should return last one
 	expectNonce(res1.Nonce, v3.ClusterType)

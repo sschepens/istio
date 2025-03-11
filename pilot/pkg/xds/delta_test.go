@@ -282,7 +282,7 @@ func TestDeltaReconnectRequests(t *testing.T) {
 	}
 
 	// A push should get a response
-	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true})
+	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true, Forced: true})
 	ads.ExpectResponse()
 
 	// Close the connection
@@ -428,7 +428,8 @@ func TestDeltaWDS(t *testing.T) {
 	// a full push and a pod delete event
 	// This is a merged push request
 	s.XdsUpdater.ConfigUpdate(&model.PushRequest{
-		Full: true,
+		Full:   true,
+		Forced: true,
 	})
 
 	resp = ads.ExpectResponse()

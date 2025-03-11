@@ -483,6 +483,7 @@ func PushXds[T any](xds model.XDSUpdater, f func(T) model.ConfigKey) func(events
 			Full:           false,
 			ConfigsUpdated: cu,
 			Reason:         model.NewReasonStats(model.AmbientUpdate),
+			Forced:			len(cu) == 0,
 		})
 	}
 }

@@ -330,11 +330,15 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 	// update eds cache only
 	s.edsCacheUpdate(allInstances)
 
+	// TODO: if len(configsUpdated) == 0 we're firing a Forced push for compatibility because no configs have been updated,
+	// we should actually skip the push.
 	pushReq := &model.PushRequest{
 		Full:           true,
 		ConfigsUpdated: configsUpdated,
 		Reason:         model.NewReasonStats(model.EndpointUpdate),
+		Forced:         len(configsUpdated) == 0,
 	}
+
 	// trigger a full push
 	s.XdsUpdater.ConfigUpdate(pushReq)
 }
@@ -469,10 +473,13 @@ func (s *Controller) serviceEntryHandler(old, curr config.Config, event model.Ev
 
 	s.queueEdsEvent(keys, s.doEdsCacheUpdate)
 
+	// TODO: if len(configsUpdated) == 0 we're firing a Forced push for compatibility because no configs have been updated,
+	// we should actually skip the push.
 	pushReq := &model.PushRequest{
 		Full:           true,
 		ConfigsUpdated: configsUpdated,
 		Reason:         model.NewReasonStats(model.ServiceUpdate),
+		Forced:         len(configsUpdated) == 0,
 	}
 	s.XdsUpdater.ConfigUpdate(pushReq)
 }
@@ -611,10 +618,13 @@ func (s *Controller) WorkloadInstanceHandler(wi *model.WorkloadInstance, event m
 	if fullPush {
 		log.Debugf("Full push triggered during event %s for workload instance (%s/%s) in namespace %s", event,
 			wi.Kind, wi.Endpoint.Address, wi.Namespace)
+		// TODO: if len(configsUpdated) == 0 we're firing a Forced push for compatibility because no configs have been updated,
+		// we should actually skip the push.
 		pushReq := &model.PushRequest{
 			Full:           true,
 			ConfigsUpdated: configsUpdated,
 			Reason:         model.NewReasonStats(model.EndpointUpdate),
+			Forced:         len(configsUpdated) == 0,
 		}
 		s.XdsUpdater.ConfigUpdate(pushReq)
 	}

@@ -289,7 +289,7 @@ func BenchmarkEndpointGeneration(b *testing.B) {
 					watchedResources = append(watchedResources, fmt.Sprintf("outbound|80||foo-%d.com", svc))
 				}
 				wr := &model.WatchedResource{ResourceNames: watchedResources}
-				c, _, _ = s.Discovery.Generators[v3.EndpointType].Generate(proxy, wr, &model.PushRequest{Full: true, Push: s.PushContext()})
+				c, _, _ = s.Discovery.Generators[v3.EndpointType].Generate(proxy, wr, &model.PushRequest{Full: true, Push: s.PushContext(), Forced: true})
 			}
 			logDebug(b, c)
 		})
@@ -312,7 +312,7 @@ func runBenchmark(b *testing.B, tpe string, testCases []ConfigInput) {
 			b.ResetTimer()
 			var c model.Resources
 			for n := 0; n < b.N; n++ {
-				c, _, _ = s.Discovery.Generators[tpe].Generate(proxy, wr, &model.PushRequest{Full: true, Push: s.PushContext()})
+				c, _, _ = s.Discovery.Generators[tpe].Generate(proxy, wr, &model.PushRequest{Full: true, Push: s.PushContext(), Forced: true})
 				if len(c) == 0 {
 					b.Fatalf("Got no %v's!", tpe)
 				}
@@ -337,7 +337,7 @@ func testBenchmark(t *testing.T, tpe string, testCases []ConfigInput) {
 			tt.Instances = 1
 			s, proxy := setupAndInitializeTest(t, tt)
 			wr := getWatchedResources(tpe, tt, s, proxy)
-			c, _, _ := s.Discovery.Generators[tpe].Generate(proxy, wr, &model.PushRequest{Full: true, Push: s.PushContext()})
+			c, _, _ := s.Discovery.Generators[tpe].Generate(proxy, wr, &model.PushRequest{Full: true, Push: s.PushContext(), Forced: true})
 			if len(c) == 0 {
 				t.Fatalf("Got no %v's!", tpe)
 			}

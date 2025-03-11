@@ -82,7 +82,7 @@ func NewXdsServer(stop chan struct{}, gen model.XdsResourceGenerator) *xds.Disco
 	}
 	s.ProxyNeedsPush = func(proxy *model.Proxy, req *model.PushRequest) bool {
 		// Empty changes means "all"
-		if len(req.ConfigsUpdated) == 0 {
+		if req.Forced {
 			sdsServiceLog.Debugf("Proxy %s needs push all")
 			return true
 		}
