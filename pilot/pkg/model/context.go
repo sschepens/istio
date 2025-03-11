@@ -42,6 +42,7 @@ import (
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/mesh"
+	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/ledger"
 	"istio.io/istio/pkg/maps"
 	pm "istio.io/istio/pkg/model"
@@ -573,6 +574,17 @@ func (node *Proxy) SetGatewaysForProxy(ps *PushContext) {
 		ContainsAutoPassthroughGateways: prevMergedGateway.ContainsAutoPassthroughGateways,
 		AutoPassthroughSNIHosts:         prevMergedGateway.GetAutoPassthrughGatewaySNIHosts(),
 	}
+}
+
+func (node *Proxy) ShouldUpdateServiceTargets(updates sets.Set[ConfigKey]) bool {
+	// we only care for services which can actually select this proxy
+	for config := range updates {
+		if config.Kind == kind.ServiceEntry || config.Namespace == node.Metadata.Namespace {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (node *Proxy) SetServiceTargets(serviceDiscovery ServiceDiscovery) {
