@@ -741,7 +741,8 @@ func (s *DiscoveryServer) pushConnection(con *Connection, pushEv *Event) error {
 		s.computeProxyState(con.proxy, pushRequest)
 	}
 
-	if !s.ProxyNeedsPush(con.proxy, pushRequest) {
+	pushRequest, needsPush := s.ProxyNeedsPush(con.proxy, pushRequest)
+	if !needsPush {
 		log.Debugf("Skipping push to %v, no updates required", con.conID)
 		if pushRequest.Full {
 			// Only report for full versions, incremental pushes do not have a new version.

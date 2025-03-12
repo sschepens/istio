@@ -158,7 +158,8 @@ func (s *DiscoveryServer) pushConnectionDelta(con *Connection, pushEv *Event) er
 		s.computeProxyState(con.proxy, pushRequest)
 	}
 
-	if !s.ProxyNeedsPush(con.proxy, pushRequest) {
+	pushRequest, needsPush := s.ProxyNeedsPush(con.proxy, pushRequest)
+	if !needsPush {
 		deltaLog.Debugf("Skipping push to %v, no updates required", con.conID)
 		if pushRequest.Full {
 			// Only report for full versions, incremental pushes do not have a new version
