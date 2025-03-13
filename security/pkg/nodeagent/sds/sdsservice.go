@@ -80,11 +80,11 @@ func NewXdsServer(stop chan struct{}, gen model.XdsResourceGenerator) *xds.Disco
 	s.Generators = map[string]model.XdsResourceGenerator{
 		v3.SecretType: gen,
 	}
-	s.ProxyNeedsPush = func(proxy *model.Proxy, req *model.PushRequest) bool {
+	s.ProxyNeedsPush = func(proxy *model.Proxy, req *model.PushRequest) (*model.PushRequest, bool) {
 		// Empty changes means "all"
 		if req.Forced {
 			sdsServiceLog.Debugf("Proxy %s needs push all")
-			return true
+			return req, true
 		}
 		var resources []string
 		proxy.RLock()
@@ -95,7 +95,7 @@ func NewXdsServer(stop chan struct{}, gen model.XdsResourceGenerator) *xds.Disco
 
 		if resources == nil {
 			sdsServiceLog.Debugf("Skipping push for proxy %s, no resources", proxy.ID)
-			return false
+			return req, false
 		}
 
 		names := sets.New(resources...)
@@ -109,7 +109,7 @@ func NewXdsServer(stop chan struct{}, gen model.XdsResourceGenerator) *xds.Disco
 
 		sdsServiceLog.Debugf("Proxy %s needs push %v, names: %v request: %v", proxy.ID, found, names, req)
 
-		return found
+		return req, found
 	}
 	s.CachesSynced()
 	s.Start(stop)
