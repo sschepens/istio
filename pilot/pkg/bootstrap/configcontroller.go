@@ -147,6 +147,7 @@ func (s *Server) initK8SConfigStore(args *PilotArgs) error {
 		s.XDSServer.ConfigUpdate(&model.PushRequest{
 			Full:   true,
 			Reason: model.NewReasonStats(model.TagUpdate),
+			Forced: true,
 		})
 	})
 	if features.EnableGatewayAPI {
@@ -168,6 +169,7 @@ func (s *Server) initK8SConfigStore(args *PilotArgs) error {
 					s.XDSServer.ConfigUpdate(&model.PushRequest{
 						Full:   true,
 						Reason: model.NewReasonStats(model.GlobalUpdate),
+						Forced: true,
 					})
 					<-leaderStop
 					log.Infof("Stopping gateway status writer")

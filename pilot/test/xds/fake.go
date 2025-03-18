@@ -160,6 +160,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 			s.ConfigUpdate(&model.PushRequest{
 				Full:   true,
 				Reason: model.NewReasonStats(model.NetworksTrigger),
+				Forced: true,
 			})
 		})
 	}
@@ -336,7 +337,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 
 	// Send an update. This ensures that even if there are no configs provided, the push context is
 	// initialized.
-	s.ConfigUpdate(&model.PushRequest{Full: true})
+	s.ConfigUpdate(&model.PushRequest{Full: true, Forced: true})
 
 	// Wait until initial updates are committed
 	c := s.InboundUpdates.Load()
