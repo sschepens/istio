@@ -26,6 +26,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	. "github.com/onsi/gomega"
+	"github.com/puzpuzpuz/xsync/v3"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -1643,6 +1644,14 @@ func TestInitPushContext(t *testing.T) {
 		cmpopts.IgnoreUnexported(IstioEndpoint{}),
 		cmpopts.IgnoreInterfaces(struct{ mesh.Holder }{}),
 		protocmp.Transform(),
+		cmp.Transformer("", func(m *xsync.MapOf[string, *SidecarScope]) map[string]*SidecarScope {
+			result := make(map[string]*SidecarScope)
+			m.Range(func(k string, v *SidecarScope) bool {
+				result[k] = v
+				return true
+			})
+			return result
+		}),
 	)
 	if diff != "" {
 		t.Fatalf("Push context had a diff after update: %v", diff)
