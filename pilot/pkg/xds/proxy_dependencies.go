@@ -64,10 +64,13 @@ func filterRelevantUpdates(proxy *model.Proxy, req *model.PushRequest) *model.Pu
 	}
 
 	if changed {
+		log.Infof("Filtered %d configs for proxy %s, remaining configs: %v", len(req.ConfigsUpdated)-len(relevantUpdates), proxy.ID, relevantUpdates)
 		newPushRequest := *req
 		newPushRequest.ConfigsUpdated = relevantUpdates
 		return &newPushRequest
 	}
+
+	log.Infof("No config filtering needed for proxy %s", proxy.ID)
 
 	return req
 }

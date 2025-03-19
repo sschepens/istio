@@ -356,9 +356,9 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts DebounceO
 						pushCounter, debouncedEvents, reasonsUpdated(req),
 						quietTime, eventDelay, req.Full)
 				} else {
-					log.Infof("Push debounce stable[%d] %d for config %s: %v since last change, %v since last push, full=%v",
+					log.Infof("Push debounce stable[%d] %d for config %s: %v since last change, %v since last push, full=%v, forced=%v",
 						pushCounter, debouncedEvents, configsUpdated(req),
-						quietTime, eventDelay, req.Full)
+						quietTime, eventDelay, req.Full, req.Forced)
 				}
 				free = false
 				go push(req, debouncedEvents, startDebounce)
@@ -408,6 +408,9 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts DebounceO
 }
 
 func configsUpdated(req *model.PushRequest) string {
+	if len(req.ConfigsUpdated) < 500 {
+		return fmt.Sprintf("%v", req.ConfigsUpdated)
+	}
 	configs := ""
 	for key := range req.ConfigsUpdated {
 		configs += key.String()
