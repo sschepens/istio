@@ -15,6 +15,8 @@
 package xds
 
 import (
+	"strings"
+
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/core"
 	"istio.io/istio/pkg/config/schema/kind"
@@ -50,6 +52,9 @@ func rdsNeedsPush(req *model.PushRequest, proxy *model.Proxy) bool {
 	}
 	for config := range req.ConfigsUpdated {
 		if !skippedRdsConfigs.Contains(config.Kind) {
+			if strings.Contains(proxy.ID, "mesh-latency-tests") {
+				log.Infof("proxy: %s, needs RDS push for config: %s", proxy.ID, config.String())
+			}
 			return true
 		}
 	}

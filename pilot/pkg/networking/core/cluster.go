@@ -71,6 +71,9 @@ func (configgen *ConfigGeneratorImpl) BuildDeltaClusters(proxy *model.Proxy, upd
 ) ([]*discovery.Resource, []string, model.XdsLogDetails, bool) {
 	// if we can't use delta, fall back to generate all
 	if !shouldUseDelta(updates) {
+		if strings.Contains(proxy.ID, "mesh-latency-tests") {
+			log.Infof("Proxy %s: cannot use Delta CDS, forced=%s, configs=%v", proxy.ID, updates.Forced, updates.ConfigsUpdated)
+		}
 		cl, lg := configgen.BuildClusters(proxy, updates)
 		return cl, nil, lg, false
 	}

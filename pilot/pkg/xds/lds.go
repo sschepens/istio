@@ -15,6 +15,8 @@
 package xds
 
 import (
+	"strings"
+
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 
 	"istio.io/istio/pilot/pkg/model"
@@ -74,6 +76,9 @@ func ldsNeedsPush(proxy *model.Proxy, req *model.PushRequest) bool {
 	}
 	for config := range req.ConfigsUpdated {
 		if !skippedLdsConfigs[proxy.Type].Contains(config.Kind) {
+			if strings.Contains(proxy.ID, "mesh-latency-tests") {
+				log.Infof("proxy: %s, needs LDS push for config: %s", proxy.ID, config.String())
+			}
 			return true
 		}
 	}
