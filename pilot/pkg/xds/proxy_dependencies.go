@@ -15,6 +15,8 @@
 package xds
 
 import (
+	"strings"
+
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/config/host"
@@ -64,13 +66,17 @@ func filterRelevantUpdates(proxy *model.Proxy, req *model.PushRequest) *model.Pu
 	}
 
 	if changed {
-		log.Infof("Filtered %d configs for proxy %s, remaining configs: %v", len(req.ConfigsUpdated)-len(relevantUpdates), proxy.ID, relevantUpdates)
+		if strings.Contains(proxy.ID, "mesh-latency-tests") {
+			log.Infof("Filtered %d configs for proxy %s, remaining configs: %v", len(req.ConfigsUpdated)-len(relevantUpdates), proxy.ID, relevantUpdates)
+		}
 		newPushRequest := *req
 		newPushRequest.ConfigsUpdated = relevantUpdates
 		return &newPushRequest
 	}
 
-	log.Infof("No config filtering needed for proxy %s", proxy.ID)
+	if strings.Contains(proxy.ID, "mesh-latency-tests") {
+		log.Infof("No config filtering needed for proxy %s", proxy.ID)
+	}
 
 	return req
 }

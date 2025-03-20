@@ -408,9 +408,6 @@ func debounce(ch chan *model.PushRequest, stopCh <-chan struct{}, opts DebounceO
 }
 
 func configsUpdated(req *model.PushRequest) string {
-	if len(req.ConfigsUpdated) < 500 {
-		return fmt.Sprintf("%v", req.ConfigsUpdated)
-	}
 	configs := ""
 	for key := range req.ConfigsUpdated {
 		configs += key.String()
