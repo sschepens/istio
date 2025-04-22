@@ -228,4 +228,7 @@ var (
 			"This value should be a comma-separated list of resources names."+
 			"Items on this list can be prefixed with a '*.' meaning a whole group should be included regardless of the ignore list.",
 	).Get()
+
+	EnableVirtualServiceController = env.Register("PILOT_ENABLE_VIRTUAL_SERVICE_CONTROLLER", true,
+		"If true, an new optimized VirtualService merging controller is used.").Get()
 )
