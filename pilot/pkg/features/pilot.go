@@ -236,6 +236,9 @@ var (
 
 	ManagedGatewayController = env.Register("PILOT_GATEWAY_API_CONTROLLER_NAME", "istio.io/gateway-controller",
 		"Gateway API controller name. istiod will only reconcile Gateway API resources referencing a GatewayClass with this controller name").Get()
+
+	EnableProxyFindPodByIP = env.Register("ENABLE_PROXY_FIND_POD_BY_IP", false,
+		"If enabled, the pod controller will allow findig pods matching proxies by IP if it fails to find them by name.").Get()
 )
 
 // UnsafeFeaturesEnabled returns true if any unsafe features are enabled.

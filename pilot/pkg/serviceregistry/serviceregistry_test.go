@@ -1818,7 +1818,7 @@ func TestLocality(t *testing.T) {
 	namespace := "default"
 	basePod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pod",
+			Name:      "test-1",
 			Namespace: namespace,
 			Labels:    map[string]string{},
 		},
@@ -1979,8 +1979,10 @@ func TestLocality(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := xds.FakeOptions{}
+			proxyName := ""
 			if tt.pod != nil {
 				opts.KubernetesObjects = append(opts.KubernetesObjects, tt.pod)
+				proxyName = tt.pod.Name + "." + tt.pod.Namespace
 			}
 			if tt.node != nil {
 				opts.KubernetesObjects = append(opts.KubernetesObjects, tt.node)
@@ -1989,7 +1991,7 @@ func TestLocality(t *testing.T) {
 				opts.Configs = append(opts.Configs, tt.obj)
 			}
 			s := xds.NewFakeDiscoveryServer(t, opts)
-			s.Connect(s.SetupProxy(&model.Proxy{IPAddresses: []string{"1.2.3.4"}}), nil, []string{v3.ClusterType})
+			s.Connect(s.SetupProxy(&model.Proxy{ID: proxyName, IPAddresses: []string{"1.2.3.4"}}), nil, []string{v3.ClusterType})
 			retry.UntilSuccessOrFail(t, func() error {
 				clients := s.Discovery.AllClients()
 				if len(clients) != 1 {
