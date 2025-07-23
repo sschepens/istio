@@ -1864,3 +1864,85 @@ func TestMeshNetworksToEnvoyInternalAddressConfig(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkAddConfigInfoMetadata(b *testing.B) {
+	// Test different config types and scenarios
+	testCases := []struct {
+		name     string
+		config   config.Meta
+		metadata *core.Metadata
+	}{
+		{
+			name: "VirtualService_NilMetadata",
+			config: config.Meta{
+				Name:             "test-vs",
+				Namespace:        "default",
+				Domain:           "svc.cluster.local",
+				GroupVersionKind: gvk.VirtualService,
+			},
+			metadata: nil,
+		},
+		{
+			name: "DestinationRule_NilMetadata",
+			config: config.Meta{
+				Name:             "test-dr",
+				Namespace:        "default",
+				Domain:           "svc.cluster.local",
+				GroupVersionKind: gvk.DestinationRule,
+			},
+			metadata: nil,
+		},
+		{
+			name: "VirtualService_ExistingMetadata",
+			config: config.Meta{
+				Name:             "test-vs",
+				Namespace:        "default",
+				Domain:           "svc.cluster.local",
+				GroupVersionKind: gvk.VirtualService,
+			},
+			metadata: &core.Metadata{
+				FilterMetadata: map[string]*structpb.Struct{
+					"other-metadata": {
+						Fields: map[string]*structpb.Value{
+							"other-field": {
+								Kind: &structpb.Value_StringValue{
+									StringValue: "other-value",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "DestinationRule_ExistingIstioMetadata",
+			config: config.Meta{
+				Name:             "test-dr",
+				Namespace:        "default",
+				Domain:           "svc.cluster.local",
+				GroupVersionKind: gvk.DestinationRule,
+			},
+			metadata: &core.Metadata{
+				FilterMetadata: map[string]*structpb.Struct{
+					IstioMetadataKey: {
+						Fields: map[string]*structpb.Value{
+							"subset": {
+								Kind: &structpb.Value_StringValue{
+									StringValue: "v1",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				AddConfigInfoMetadata(tc.metadata, tc.config)
+			}
+		})
+	}
+}

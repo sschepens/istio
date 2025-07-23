@@ -46,6 +46,7 @@ import (
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
+	"istio.io/istio/pkg/config/schema/gvk"
 	kubelabels "istio.io/istio/pkg/kube/labels"
 	"istio.io/istio/pkg/log"
 	pm "istio.io/istio/pkg/model"
@@ -125,6 +126,9 @@ var ALPNDownstreamWithMxc = []string{"istio-peer-exchange", "h2", "http/1.1"}
 
 // ALPNDownstream advertises that Proxy is going to talk either http2 or http 1.1.
 var ALPNDownstream = []string{"h2", "http/1.1"}
+
+var virtualServiceKebabCase = strcase.CamelCaseToKebabCase(gvk.VirtualService.Kind)
+var destinationRuleKebabCase = strcase.CamelCaseToKebabCase(gvk.DestinationRule.Kind)
 
 // ConvertAddressToCidr converts from string to CIDR proto
 func ConvertAddressToCidr(addr string) *core.CidrRange {
@@ -356,20 +360,49 @@ func BuildConfigInfoMetadata(config config.Meta) *core.Metadata {
 func AddConfigInfoMetadata(metadata *core.Metadata, config config.Meta) *core.Metadata {
 	if metadata == nil {
 		metadata = &core.Metadata{
-			FilterMetadata: map[string]*structpb.Struct{},
+			FilterMetadata: make(map[string]*structpb.Struct, 1),
 		}
 	}
-	s := "/apis/" + config.GroupVersionKind.Group + "/" + config.GroupVersionKind.Version + "/namespaces/" + config.Namespace + "/" +
-		strcase.CamelCaseToKebabCase(config.GroupVersionKind.Kind) + "/" + config.Name
+
+	var kind string
+	switch config.GroupVersionKind {
+	case gvk.VirtualService:
+		kind = virtualServiceKebabCase
+	case gvk.DestinationRule:
+		kind = destinationRuleKebabCase
+	default:
+		panic("unsupported GroupVersionKind " + config.GroupVersionKind.String())
+	}
+
+	var sb strings.Builder
+	sb.Grow(len("/apis/") + len(config.GroupVersionKind.Group) + len("/") + len(config.GroupVersionKind.Version) + len("/namespaces/") +
+		len(config.Namespace) + len("/") + len(kind) + len("/") + len(config.Name))
+
+	sb.WriteString("/apis/")
+	sb.WriteString(config.GroupVersionKind.Group)
+	sb.WriteString("/")
+	sb.WriteString(config.GroupVersionKind.Version)
+	sb.WriteString("/namespaces/")
+	sb.WriteString(config.Namespace)
+	sb.WriteString("/")
+	sb.WriteString(kind)
+	sb.WriteString("/")
+	sb.WriteString(config.Name)
+
 	if _, ok := metadata.FilterMetadata[IstioMetadataKey]; !ok {
 		metadata.FilterMetadata[IstioMetadataKey] = &structpb.Struct{
-			Fields: map[string]*structpb.Value{},
+			Fields: map[string]*structpb.Value{
+				"config": {
+					Kind: &structpb.Value_StringValue{StringValue: sb.String()},
+				},
+			},
 		}
-	}
-	metadata.FilterMetadata[IstioMetadataKey].Fields["config"] = &structpb.Value{
-		Kind: &structpb.Value_StringValue{
-			StringValue: s,
-		},
+	} else {
+		metadata.FilterMetadata[IstioMetadataKey].Fields["config"] = &structpb.Value{
+			Kind: &structpb.Value_StringValue{
+				StringValue: sb.String(),
+			},
+		}
 	}
 	return metadata
 }
