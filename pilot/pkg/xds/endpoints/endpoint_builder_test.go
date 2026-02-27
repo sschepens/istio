@@ -38,13 +38,27 @@ import (
 	"istio.io/istio/pkg/workloadapi"
 )
 
+// mockAmbientIndex is a test implementation of AmbientIndexes that returns mock service info
+type mockAmbientIndex struct {
+	model.NoopAmbientIndexes
+	serviceInfos []*model.ServiceInfo
+}
+
+func (m *mockAmbientIndex) ServiceInfo(key string) *model.ServiceInfo {
+	for _, info := range m.serviceInfos {
+		svcKey := fmt.Sprintf("%s/%s", info.GetNamespace(), info.Service.GetHostname())
+		if key == svcKey {
+			return info
+		}
+	}
+	return nil
+}
+
 // MockDiscovery is an in-memory ServiceDiscover with mock services
 type localServiceDiscovery struct {
 	services         []*model.Service
 	serviceInstances []*model.ServiceInstance
-	serviceInfos     []*model.ServiceInfo
 
-	model.NoopAmbientIndexes
 	model.NetworkGatewaysHandler
 }
 
@@ -82,16 +96,6 @@ func (l *localServiceDiscovery) NetworkGateways() []model.NetworkGateway {
 }
 
 func (l *localServiceDiscovery) MCSServices() []model.MCSServiceInfo {
-	return nil
-}
-
-func (l *localServiceDiscovery) ServiceInfo(key string) *model.ServiceInfo {
-	for _, info := range l.serviceInfos {
-		svcKey := fmt.Sprintf("%s/%s", info.GetNamespace(), info.Service.GetHostname())
-		if key == svcKey {
-			return info
-		}
-	}
 	return nil
 }
 
@@ -502,9 +506,10 @@ func TestFilterIstioEndpoint(t *testing.T) {
 			if err := env.InitNetworksManager(xdsUpdater); err != nil {
 				t.Fatal(err)
 			}
-			var svcInfos []*model.ServiceInfo
 			if tt.svcInfo != nil {
-				svcInfos = []*model.ServiceInfo{tt.svcInfo}
+				env.AmbientIndexes = &mockAmbientIndex{
+					serviceInfos: []*model.ServiceInfo{tt.svcInfo},
+				}
 				test.SetForTest(t, &features.EnableAmbientMultiNetwork, true)
 			}
 			env.ServiceDiscovery = &localServiceDiscovery{
@@ -512,7 +517,6 @@ func TestFilterIstioEndpoint(t *testing.T) {
 				serviceInstances: []*model.ServiceInstance{{
 					Endpoint: tt.ep,
 				}},
-				serviceInfos: svcInfos,
 			}
 			env.Init()
 
