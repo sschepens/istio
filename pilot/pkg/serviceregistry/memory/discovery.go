@@ -332,5 +332,6 @@ func (sd *ServiceDiscovery) AppendServiceHandler(f model.ServiceHandler) {
 func (sd *ServiceDiscovery) Run(<-chan struct{}) {}
 
 // HasSynced always returns true
-func (sd *ServiceDiscovery) HasSynced() bool { return true }
-
+func (sd *ServiceDiscovery) HasSynced() bool {
+	return true
+}
