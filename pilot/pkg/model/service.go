@@ -1355,7 +1355,7 @@ const (
 	WaypointPolicyReasonTargetNotFound   = "TargetNotFound"
 )
 
-// impl pilot/pkg/serviceregistry/kube/controller/ambient/statusqueue/StatusWriter
+// impl pilot/pkg/serviceregistry/ambient/statusqueue/StatusWriter
 func (i WaypointPolicyStatus) GetStatusTarget() TypedObject {
 	return i.Source
 }
@@ -1456,7 +1456,7 @@ type WorkloadAuthorization struct {
 	Binding PolicyBindingStatus
 }
 
-// impl pilot/pkg/serviceregistry/kube/controller/ambient/statusqueue/StatusWriter
+// impl pilot/pkg/serviceregistry/ambient/statusqueue/StatusWriter
 func (i WorkloadAuthorization) GetStatusTarget() TypedObject {
 	return i.Source
 }
