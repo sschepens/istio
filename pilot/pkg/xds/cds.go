@@ -61,9 +61,6 @@ func cdsNeedsPush(req *model.PushRequest, proxy *model.Proxy) (*model.PushReques
 	if proxy.Type == model.Waypoint && waypointNeedsPush(req) {
 		return req, true
 	}
-	if !req.Full {
-		return req, false
-	}
 
 	relevantUpdates := make(sets.Set[model.ConfigKey])
 	filtered := false

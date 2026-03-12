@@ -54,10 +54,13 @@ func (s *DiscoveryServer) EDSUpdate(shard model.ShardKey, serviceName string, na
 	// Update the endpoint shards
 	pushType := s.Env.EndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, true)
 	if pushType == model.IncrementalPush || pushType == model.FullPush {
+		configKind := kind.Endpoints
+		if pushType == model.FullPush {
+			configKind = kind.ServiceEntry
+		}
 		// Trigger a push
 		s.ConfigUpdate(&model.PushRequest{
-			Full:           pushType == model.FullPush,
-			ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: serviceName, Namespace: namespace}),
+			ConfigsUpdated: sets.New(model.ConfigKey{Kind: configKind, Name: serviceName, Namespace: namespace}),
 			Reason:         model.NewReasonStats(model.EndpointUpdate),
 		})
 	}
@@ -96,6 +99,7 @@ var _ model.XdsDeltaResourceGenerator = &EdsGenerator{}
 // Sidecar only impacts CDS cluster selection, so it doesn't impact EDS directly, proxy will transparently
 // request EDS for new cluster and unsubscribe from old clusters.
 var edsAffectingConfigs = sets.New(
+	kind.Endpoints,
 	kind.ServiceEntry,
 	kind.DestinationRule,
 	kind.PeerAuthentication,
@@ -104,6 +108,7 @@ var edsAffectingConfigs = sets.New(
 )
 
 var deltaAwareEdsConfigs = sets.New(
+	kind.Endpoints,
 	kind.ServiceEntry,
 	kind.DestinationRule,
 	kind.PeerAuthentication,
@@ -113,7 +118,6 @@ func edsNeedsPush(req *model.PushRequest, proxy *model.Proxy) bool {
 	if res, ok := xdsNeedsPush(req, proxy); ok {
 		return res
 	}
-	// CDS needs to be pushed for waypoint proxies on kind.Address changes, so we need to push EDS as well.
 	if proxy.Type == model.Waypoint && waypointNeedsPush(req) {
 		return true
 	}
@@ -182,7 +186,7 @@ func (eds *EdsGenerator) buildEndpoints(proxy *model.Proxy,
 			switch cfg.Kind {
 			case kind.DestinationRule:
 				changedDrs.Insert(types.NamespacedName{Name: cfg.Name, Namespace: cfg.Namespace})
-			case kind.ServiceEntry:
+			case kind.ServiceEntry, kind.Endpoints:
 				edsUpdatedServices.Insert(cfg.Name)
 			case kind.PeerAuthentication:
 				changedAuthnNs.Insert(cfg.Namespace)

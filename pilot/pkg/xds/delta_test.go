@@ -283,7 +283,7 @@ func TestDeltaReconnectRequests(t *testing.T) {
 	}
 
 	// A push should get a response
-	s.Discovery.ConfigUpdate(&model.PushRequest{Full: true, Forced: true})
+	s.Discovery.ConfigUpdate(&model.PushRequest{Forced: true})
 	ads.ExpectResponse()
 
 	// Close the connection
@@ -292,7 +292,6 @@ func TestDeltaReconnectRequests(t *testing.T) {
 	// Service is removed while connection is closed
 	s.MemRegistry.RemoveService("adsupdate.example.com")
 	s.Discovery.ConfigUpdate(&model.PushRequest{
-		Full:           true,
 		ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: "adsupdate.example.com", Namespace: "default"}),
 	})
 	s.EnsureSynced(t)

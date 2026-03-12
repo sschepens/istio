@@ -40,10 +40,6 @@ func pcdsNeedsPush(req *model.PushRequest) bool {
 		return true
 	}
 
-	if !req.Full {
-		return false
-	}
-
 	if req.Forced {
 		// This needs to be better optimized
 		return true

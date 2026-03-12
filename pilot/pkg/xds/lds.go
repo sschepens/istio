@@ -79,9 +79,6 @@ func ldsNeedsPush(proxy *model.Proxy, req *model.PushRequest) bool {
 	if proxy.Type == model.Waypoint && waypointNeedsPush(req) {
 		return true
 	}
-	if !req.Full {
-		return false
-	}
 	for config := range req.ConfigsUpdated {
 		if ldsAffectingConfigs[proxy.Type].Contains(config.Kind) {
 			return true
