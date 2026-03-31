@@ -96,7 +96,7 @@ type FakeOptions struct {
 	ConfigTemplateInput any
 	// If provided, this mesh config will be used
 	MeshConfig      *meshconfig.MeshConfig
-	NetworksWatcher mesh.NetworksWatcher
+	NetworksWatcher meshwatcher.NetworksWatcherCollection
 
 	// Callback to modify the kube client before it is started
 	KubeClientModifier func(c kubelib.Client)

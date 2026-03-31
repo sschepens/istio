@@ -137,7 +137,7 @@ type Options struct {
 	XDSUpdater model.XDSUpdater
 
 	// MeshNetworksWatcher observes changes to the mesh networks config.
-	MeshNetworksWatcher mesh.NetworksWatcher
+	MeshNetworksWatcher meshwatcher.NetworksWatcherCollection
 
 	// MeshWatcher observes changes to the mesh config
 	MeshWatcher meshwatcher.WatcherCollection

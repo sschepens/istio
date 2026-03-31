@@ -69,7 +69,7 @@ type TestOptions struct {
 
 	// If provided, this mesh config will be used
 	MeshConfig      *meshconfig.MeshConfig
-	NetworksWatcher mesh.NetworksWatcher
+	NetworksWatcher meshwatcher.NetworksWatcherCollection
 
 	// Additional service registries to use. A ServiceEntry and memory registry will always be created.
 	ServiceRegistries []serviceregistry.Instance
