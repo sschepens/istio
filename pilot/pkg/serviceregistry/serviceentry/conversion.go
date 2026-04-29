@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
@@ -52,9 +53,10 @@ import (
 
 func convertPort(port *networking.ServicePort) *model.Port {
 	return &model.Port{
-		Name:     port.Name,
-		Port:     int(port.Number),
-		Protocol: protocol.Parse(port.Protocol),
+		Name:       port.Name,
+		Port:       int(port.Number),
+		Protocol:   protocol.Parse(port.Protocol),
+		TargetPort: intstr.FromInt32(int32(port.TargetPort)),
 	}
 }
 
@@ -530,10 +532,7 @@ func services(
 			// No selector: endpoints from SE directly
 			return slices.Map(services, func(ss *model.Service) ServiceWithInstances {
 				return ServiceWithInstances{
-					Service: ss,
-					TargetPorts: slices.Map(se.Ports, func(p *networking.ServicePort) uint32 {
-						return p.TargetPort
-					}),
+					Service:   ss,
 					Instances: convertServiceEntryToInstances(ctx, cfg, ss, meshConfig, clusterID, networkIDFn),
 				}
 			})
@@ -566,10 +565,7 @@ func services(
 		res := make([]ServiceWithInstances, 0, len(services))
 		for _, service := range services {
 			swi := ServiceWithInstances{
-				Service: service,
-				TargetPorts: slices.Map(se.Ports, func(p *networking.ServicePort) uint32 {
-					return p.TargetPort
-				}),
+				Service:   service,
 				Instances: make([]*model.ServiceInstance, 0, len(selectedWorkloads)*len(se.Ports)),
 			}
 			for _, wi := range selectedWorkloads {

@@ -112,12 +112,8 @@ type Outputs struct {
 }
 
 type ServiceWithInstances struct {
-	Service *model.Service
-	// TODO: this is a hack to trigger full pushes when ServiceEntry target ports change, this
-	// should probably be handled elsewhere.
-	// ref: https://github.com/istio/istio/pull/50068
-	TargetPorts []uint32
-	Instances   []*model.ServiceInstance
+	Service   *model.Service
+	Instances []*model.ServiceInstance
 }
 
 func (swi ServiceWithInstances) ResourceName() string {
@@ -125,8 +121,7 @@ func (swi ServiceWithInstances) ResourceName() string {
 }
 
 func (swi ServiceWithInstances) Equals(other ServiceWithInstances) bool {
-	return slices.Equal(swi.TargetPorts, other.TargetPorts) &&
-		swi.Service.Equals(other.Service) &&
+	return swi.Service.Equals(other.Service) &&
 		slices.EqualFunc(swi.Instances, other.Instances, func(a, b *model.ServiceInstance) bool {
 			return a.Endpoint.Equals(b.Endpoint)
 		})
@@ -321,8 +316,7 @@ func (s *Controller) pushServiceUpdates(events []krt.Event[ServiceWithInstances]
 	configsUpdated := sets.New[model.ConfigKey]()
 	shard := model.ShardKeyFromRegistry(s)
 	for _, e := range events {
-		if e.Event == controllers.EventUpdate &&
-			e.New.Service.Equals(e.Old.Service) && slices.Equal(e.New.TargetPorts, e.Old.TargetPorts) {
+		if e.Event == controllers.EventUpdate && e.New.Service.Equals(e.Old.Service) {
 			// only instances have changed
 			continue
 		}
