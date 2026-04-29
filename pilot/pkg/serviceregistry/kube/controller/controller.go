@@ -1168,8 +1168,13 @@ func (c *Controller) GetProxyWorkloadLabels(proxy *model.Proxy) labels.Instance 
 }
 
 // AppendServiceHandler implements a service catalog operation
-func (c *Controller) AppendServiceHandler(f model.ServiceHandler) {
-	c.handlers.AppendServiceHandler(f)
+func (c *Controller) AppendServiceHandler(f model.ServiceHandler) *model.ServiceHandler {
+	return c.handlers.AppendServiceHandler(f)
+}
+
+// UnregisterServiceHandler removes a handler previously registered via AppendServiceHandler.
+func (c *Controller) UnregisterServiceHandler(handle *model.ServiceHandler) {
+	c.handlers.UnregisterServiceHandler(handle)
 }
 
 // AppendWorkloadHandler implements a service catalog operation

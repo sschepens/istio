@@ -40,8 +40,14 @@ type Controller interface {
 	// Note: AppendXXXHandler is used to register high level handlers.
 	// For per cluster handlers, they should be registered by the `AppendXXXHandlerForCluster` interface.
 
-	// AppendServiceHandler notifies about changes to the service catalog.
-	AppendServiceHandler(f ServiceHandler)
+	// AppendServiceHandler notifies about changes to the service catalog. The returned handle can
+	// be passed to UnregisterServiceHandler to remove this specific registration.
+	AppendServiceHandler(f ServiceHandler) *ServiceHandler
+
+	// UnregisterServiceHandler removes a handler previously registered via AppendServiceHandler.
+	// The handle must be the value returned from AppendServiceHandler. Implementations that do
+	// not actually invoke service handlers (e.g. ServiceEntries) treat this as a no-op.
+	UnregisterServiceHandler(handle *ServiceHandler)
 
 	// AppendWorkloadHandler notifies about changes to workloads. This differs from InstanceHandler,
 	// which deals with service instances (the result of a merge of Service and Workload)
@@ -64,18 +70,44 @@ type AggregateController interface {
 }
 
 // ControllerHandlers is a utility to help Controller implementations manage their lists of handlers.
+//
+// Service handlers are stored as pointers so that AppendServiceHandler can return a stable handle
+// which UnregisterServiceHandler uses to identify and remove the corresponding entry.
 type ControllerHandlers struct {
 	mutex            sync.RWMutex
-	serviceHandlers  []ServiceHandler
+	serviceHandlers  []*ServiceHandler
 	workloadHandlers []func(*WorkloadInstance, Event)
 }
 
-func (c *ControllerHandlers) AppendServiceHandler(f ServiceHandler) {
+// AppendServiceHandler registers f and returns a handle that can be passed to
+// UnregisterServiceHandler to remove this specific registration.
+func (c *ControllerHandlers) AppendServiceHandler(f ServiceHandler) *ServiceHandler {
+	handle := &f
 	// Copy on write.
 	c.mutex.Lock()
-	handlers := make([]ServiceHandler, 0, len(c.serviceHandlers)+1)
+	handlers := make([]*ServiceHandler, 0, len(c.serviceHandlers)+1)
 	handlers = append(handlers, c.serviceHandlers...)
-	handlers = append(handlers, f)
+	handlers = append(handlers, handle)
+	c.serviceHandlers = handlers
+	c.mutex.Unlock()
+	return handle
+}
+
+// UnregisterServiceHandler removes a handler previously registered via AppendServiceHandler.
+// The handle must be the value returned from AppendServiceHandler. Calling with an unknown
+// handle (including nil) is a no-op.
+func (c *ControllerHandlers) UnregisterServiceHandler(handle *ServiceHandler) {
+	if handle == nil {
+		return
+	}
+	// Copy on write so concurrent NotifyServiceHandlers iterations are unaffected.
+	c.mutex.Lock()
+	handlers := make([]*ServiceHandler, 0, len(c.serviceHandlers))
+	for _, h := range c.serviceHandlers {
+		if h != handle {
+			handlers = append(handlers, h)
+		}
+	}
 	c.serviceHandlers = handlers
 	c.mutex.Unlock()
 }
@@ -90,7 +122,7 @@ func (c *ControllerHandlers) AppendWorkloadHandler(f func(*WorkloadInstance, Eve
 	c.mutex.Unlock()
 }
 
-func (c *ControllerHandlers) GetServiceHandlers() []ServiceHandler {
+func (c *ControllerHandlers) GetServiceHandlers() []*ServiceHandler {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	// Return a shallow copy of the array
@@ -106,7 +138,7 @@ func (c *ControllerHandlers) GetWorkloadHandlers() []func(*WorkloadInstance, Eve
 
 func (c *ControllerHandlers) NotifyServiceHandlers(prev, curr *Service, event Event) {
 	for _, f := range c.GetServiceHandlers() {
-		f(prev, curr, event)
+		(*f)(prev, curr, event)
 	}
 }
 

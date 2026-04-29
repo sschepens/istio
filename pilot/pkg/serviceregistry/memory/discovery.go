@@ -323,9 +323,15 @@ func (sd *ServiceDiscovery) MCSServices() []model.MCSServiceInfo {
 // Memory does not support workload handlers; everything is done in terms of instances
 func (sd *ServiceDiscovery) AppendWorkloadHandler(func(*model.WorkloadInstance, model.Event)) {}
 
-// AppendServiceHandler appends a service handler to the controller
-func (sd *ServiceDiscovery) AppendServiceHandler(f model.ServiceHandler) {
-	sd.handlers.AppendServiceHandler(f)
+// AppendServiceHandler appends a service handler to the controller and returns a handle that
+// can be passed to UnregisterServiceHandler to remove the registration.
+func (sd *ServiceDiscovery) AppendServiceHandler(f model.ServiceHandler) *model.ServiceHandler {
+	return sd.handlers.AppendServiceHandler(f)
+}
+
+// UnregisterServiceHandler removes a handler previously registered via AppendServiceHandler.
+func (sd *ServiceDiscovery) UnregisterServiceHandler(handle *model.ServiceHandler) {
+	sd.handlers.UnregisterServiceHandler(handle)
 }
 
 // Run will run the controller

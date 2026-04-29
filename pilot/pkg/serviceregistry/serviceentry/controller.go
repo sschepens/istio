@@ -480,8 +480,15 @@ func (s *Controller) Cluster() cluster.ID {
 	return s.clusterID
 }
 
-// AppendServiceHandler adds service resource event handler. Service Entries does not use these handlers.
-func (s *Controller) AppendServiceHandler(_ model.ServiceHandler) {}
+// AppendServiceHandler adds service resource event handler. Service Entries does not use these
+// handlers, but to satisfy the Controller interface a handle is returned that can be passed to
+// UnregisterServiceHandler — both calls are effectively no-ops.
+func (s *Controller) AppendServiceHandler(f model.ServiceHandler) *model.ServiceHandler {
+	return nil
+}
+
+// UnregisterServiceHandler is a no-op: ServiceEntries does not actually invoke service handlers.
+func (s *Controller) UnregisterServiceHandler(_ *model.ServiceHandler) {}
 
 func (s *Controller) AppendWorkloadHandler(h func(*model.WorkloadInstance, model.Event)) {
 	s.workloadHandlers = append(s.workloadHandlers, h)

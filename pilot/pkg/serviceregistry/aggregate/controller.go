@@ -391,8 +391,16 @@ func (c *Controller) HasSynced() bool {
 	return true
 }
 
-func (c *Controller) AppendServiceHandler(f model.ServiceHandler) {
-	c.handlers.AppendServiceHandler(f)
+// AppendServiceHandler registers f to be notified of service events from any registry. The
+// returned handle can be passed to UnregisterServiceHandler to remove this registration.
+func (c *Controller) AppendServiceHandler(f model.ServiceHandler) *model.ServiceHandler {
+	return c.handlers.AppendServiceHandler(f)
+}
+
+// UnregisterServiceHandler removes a handler previously registered via AppendServiceHandler.
+// The handle must be the value returned from AppendServiceHandler.
+func (c *Controller) UnregisterServiceHandler(handle *model.ServiceHandler) {
+	c.handlers.UnregisterServiceHandler(handle)
 }
 
 func (c *Controller) AppendWorkloadHandler(f func(*model.WorkloadInstance, model.Event)) {
