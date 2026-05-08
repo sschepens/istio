@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"istio.io/api/annotation"
 	"istio.io/api/label"
@@ -212,8 +213,7 @@ type Controller struct {
 	imports serviceImportCache
 	pods    *PodCache
 
-	crdHandlers []func(name string)
-	handlers    model.ControllerHandlers
+	handlers model.ControllerHandlers
 
 	// This is only used for test
 	stop chan struct{}
@@ -327,6 +327,7 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 	} else {
 		c.meshWatcher = mesh.NewRestrictedConfigWatcher(options.MeshWatcher)
 	}
+	// TODO(sschepens): remove after krt migration
 	if c.opts.MeshNetworksWatcher != nil {
 		c.networksHandlerRegistration = c.opts.MeshNetworksWatcher.AddNetworksHandler(func() {
 			c.reloadMeshNetworks()
@@ -712,13 +713,6 @@ func (c *Controller) Run(stop <-chan struct{}) {
 	log.Infof("Controller terminated")
 }
 
-// Stop the controller. Only for tests, to simplify the code (defer c.Stop())
-func (c *Controller) Stop() {
-	if c.stop != nil {
-		close(c.stop)
-	}
-}
-
 // Services implements a service catalog operation
 func (c *Controller) Services() []*model.Service {
 	c.RLock()
@@ -806,12 +800,6 @@ func (c *Controller) serviceInstancesFromWorkloadInstances(svc *model.Service, r
 		return nil
 	}
 
-	// Now get the target Port for this service port
-	targetPort := findServiceTargetPort(servicePort, k8sService)
-	if targetPort.num == 0 {
-		targetPort.num = servicePort.Port
-	}
-
 	out := make([]*model.ServiceInstance, 0)
 
 	c.workloadInstancesIndex.ForEach(func(wi *model.WorkloadInstance) {
@@ -819,7 +807,7 @@ func (c *Controller) serviceInstancesFromWorkloadInstances(svc *model.Service, r
 			return
 		}
 		if selector.Match(wi.Endpoint.Labels) {
-			instance := serviceInstanceFromWorkloadInstance(svc, servicePort, targetPort, wi)
+			instance := serviceInstanceFromWorkloadInstance(svc, servicePort, wi)
 			if instance != nil {
 				out = append(out, instance)
 			}
@@ -828,23 +816,26 @@ func (c *Controller) serviceInstancesFromWorkloadInstances(svc *model.Service, r
 	return out
 }
 
-func serviceInstanceFromWorkloadInstance(svc *model.Service, servicePort *model.Port,
-	targetPort serviceTargetPort, wi *model.WorkloadInstance,
+func serviceInstanceFromWorkloadInstance(
+	svc *model.Service,
+	servicePort *model.Port,
+	wi *model.WorkloadInstance,
 ) *model.ServiceInstance {
 	// create an instance with endpoint whose service port name matches
 	istioEndpoint := wi.Endpoint.ShallowCopy()
 
-	// by default, use the numbered targetPort
-	istioEndpoint.EndpointPort = uint32(targetPort.num)
-
-	if targetPort.name != "" {
+	if servicePort.TargetPort.Type == intstr.String {
 		// This is a named port, find the corresponding port in the port map
-		matchedPort := wi.PortMap[targetPort.name]
-		if matchedPort != 0 {
-			istioEndpoint.EndpointPort = matchedPort
-		} else if targetPort.explicitName {
-			// No match found, and we expect the name explicitly in the service, skip this endpoint
+		matchedPort := wi.PortMap[servicePort.TargetPort.StrVal]
+		// No match found, and we expect the name explicitly in the service, skip this endpoint
+		if matchedPort == 0 {
 			return nil
+		}
+		istioEndpoint.EndpointPort = matchedPort
+	} else {
+		istioEndpoint.EndpointPort = uint32(servicePort.TargetPort.IntVal)
+		if istioEndpoint.EndpointPort == 0 {
+			istioEndpoint.EndpointPort = uint32(servicePort.Port)
 		}
 	}
 
@@ -900,7 +891,7 @@ func (c *Controller) GetProxyServiceTargets(proxy *model.Proxy) []model.ServiceT
 			if services := getPodServices(allServices, pod); len(services) > 0 {
 				out := make([]model.ServiceTarget, 0)
 				for _, svc := range services {
-					out = append(out, c.GetProxyServiceTargetsByPod(pod, svc)...)
+					out = append(out, c.getProxyServiceTargetsByPod(pod, svc)...)
 				}
 				return out
 			}
@@ -954,13 +945,7 @@ func (c *Controller) serviceTargetsFromWorkloadInstance(si *model.WorkloadInstan
 					continue
 				}
 
-				// Now get the target Port for this service port
-				targetPort := findServiceTargetPort(servicePort, k8sSvc)
-				if targetPort.num == 0 {
-					targetPort.num = servicePort.Port
-				}
-
-				instance := serviceInstanceFromWorkloadInstance(service, servicePort, targetPort, si)
+				instance := serviceInstanceFromWorkloadInstance(service, servicePort, si)
 				if instance != nil {
 					out = append(out, model.ServiceInstanceToTarget(instance))
 				}
@@ -1111,7 +1096,7 @@ func (c *Controller) GetProxyServiceTargetsFromMetadata(proxy *model.Proxy) ([]m
 	return out, nil
 }
 
-func (c *Controller) GetProxyServiceTargetsByPod(pod *v1.Pod, service *v1.Service) []model.ServiceTarget {
+func (c *Controller) getProxyServiceTargetsByPod(pod *v1.Pod, service *v1.Service) []model.ServiceTarget {
 	var out []model.ServiceTarget
 
 	for _, svc := range c.servicesForNamespacedName(config.NamespacedName(service)) {
@@ -1182,24 +1167,19 @@ func (c *Controller) AppendWorkloadHandler(f func(*model.WorkloadInstance, model
 	c.handlers.AppendWorkloadHandler(f)
 }
 
-// AppendCrdHandlers register handlers on crd event.
-func (c *Controller) AppendCrdHandlers(f func(name string)) {
-	c.crdHandlers = append(c.crdHandlers, f)
-}
-
 // hostNamesForNamespacedName returns all possible hostnames for the given service name.
 // If Kubernetes Multi-Cluster Services (MCS) is enabled, this will contain the regular
 // hostname as well as the MCS hostname (clusterset.local). Otherwise, only the regular
 // hostname will be returned.
-func (c *Controller) hostNamesForNamespacedName(name types.NamespacedName) []host.Name {
+func hostNamesForNamespacedName(name types.NamespacedName, domainSuffix string) []host.Name {
 	if features.EnableMCSHost {
 		return []host.Name{
-			kube.ServiceHostname(name.Name, name.Namespace, c.opts.DomainSuffix),
+			kube.ServiceHostname(name.Name, name.Namespace, domainSuffix),
 			serviceClusterSetLocalHostname(name),
 		}
 	}
 	return []host.Name{
-		kube.ServiceHostname(name.Name, name.Namespace, c.opts.DomainSuffix),
+		kube.ServiceHostname(name.Name, name.Namespace, domainSuffix),
 	}
 }
 

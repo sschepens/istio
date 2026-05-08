@@ -115,7 +115,7 @@ func (esc *endpointSliceController) onEventInternal(_, ep *v1.EndpointSlice, eve
 		return
 	}
 
-	hostnames := esc.c.hostNamesForNamespacedName(namespacedName)
+	hostnames := hostNamesForNamespacedName(namespacedName, esc.c.opts.DomainSuffix)
 	log.Debugf("triggering EDS push for %s in namespace %s", hostnames, namespacedName.Namespace)
 	// Trigger EDS push for all hostnames.
 	esc.pushEDS(hostnames, namespacedName.Namespace)
@@ -165,7 +165,7 @@ func serviceNeedsPush(svc *corev1.Service) bool {
 
 // GetProxyServiceTargets returns service instances co-located with a given proxy
 // This is only used to find the targets associated with a headless service.
-// For the service with selector, it will use GetProxyServiceTargetsByPod to get the service targets.
+// For the service with selector, it will use getProxyServiceTargetsByPod to get the service targets.
 func (esc *endpointSliceController) GetProxyServiceTargets(proxy *model.Proxy) []model.ServiceTarget {
 	eps := esc.slices.List(proxy.Metadata.Namespace, endpointSliceSelector)
 	var out []model.ServiceTarget
@@ -224,7 +224,7 @@ func (esc *endpointSliceController) deleteEndpointSlice(slice *v1.EndpointSlice)
 
 	esc.endpointCache.mu.Lock()
 	defer esc.endpointCache.mu.Unlock()
-	for _, hostName := range esc.c.hostNamesForNamespacedName(getServiceNamespacedName(slice)) {
+	for _, hostName := range hostNamesForNamespacedName(getServiceNamespacedName(slice), esc.c.opts.DomainSuffix) {
 		// endpointSlice cache update
 		if esc.endpointCache.has(hostName) {
 			esc.endpointCache.delete(hostName, slice.Name)
@@ -233,7 +233,7 @@ func (esc *endpointSliceController) deleteEndpointSlice(slice *v1.EndpointSlice)
 }
 
 func (esc *endpointSliceController) updateEndpointSlice(slice *v1.EndpointSlice) {
-	for _, hostname := range esc.c.hostNamesForNamespacedName(getServiceNamespacedName(slice)) {
+	for _, hostname := range hostNamesForNamespacedName(getServiceNamespacedName(slice), esc.c.opts.DomainSuffix) {
 		esc.updateEndpointCacheForSlice(hostname, slice)
 	}
 }

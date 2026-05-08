@@ -6,7 +6,6 @@ import (
 
 	"github.com/yl2chen/cidranger"
 	"istio.io/api/label"
-	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
 	"istio.io/istio/pkg/cluster"
@@ -14,11 +13,8 @@ import (
 	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/labels"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
-	"istio.io/istio/pkg/config/schema/gvr"
-	kubelib "istio.io/istio/pkg/kube"
-	"istio.io/istio/pkg/kube/kclient"
+	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
-	"istio.io/istio/pkg/kube/kubetypes"
 	"istio.io/istio/pkg/network"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
@@ -39,15 +35,17 @@ type krtNetworkManager struct {
 func newKrtNetworkManager(
 	services krt.Collection[*model.Service],
 	localNamespaces krt.Collection[*corev1.Namespace],
+	gateways krt.Collection[*gatewayv1.Gateway],
 	meshNetworks meshwatcher.NetworksWatcherCollection,
-	client kubelib.Client,
+	xdsUpdater model.XDSUpdater,
 	systemNamespace string,
 	clusterID cluster.ID,
 	discoverRemoteGatewayResources bool,
+	features Features,
 	opts krt.OptionsBuilder,
 ) *krtNetworkManager {
 	localMeshNetworkInfo := LocalMeshNetworkInfo(localNamespaces, meshNetworks, systemNamespace, clusterID, opts)
-	networkGateways := NetworkGateways(services, localMeshNetworkInfo, clusterID, client, discoverRemoteGatewayResources, opts)
+	networkGateways := NetworkGateways(services, localMeshNetworkInfo, clusterID, gateways, discoverRemoteGatewayResources, features, opts)
 
 	n := krtNetworkManager{
 		MeshNetworkInfo:           localMeshNetworkInfo,
@@ -56,12 +54,27 @@ func newKrtNetworkManager(
 
 	networkGateways.AsCollection().RegisterBatch(func(o []krt.Event[AggregateGateways]) {
 		n.NotifyGatewayHandlers()
+		shouldPush := false
+		for _, e := range o {
+			if e.Event == controllers.EventAdd {
+				// skip initial event
+				continue
+			}
+			shouldPush = true
+		}
+		if shouldPush {
+			xdsUpdater.ConfigUpdate(&model.PushRequest{Reason: model.NewReasonStats(model.NetworksTrigger), Forced: true})
+		}
 	}, false)
 
 	return &n
 }
 
-func (n *krtNetworkManager) Network(ctx krt.HandlerContext, endpointIP string, labels labels.Instance) network.ID {
+func (n *krtNetworkManager) Network(endpointIP string, labels labels.Instance) network.ID {
+	return n.NetworkCtx(nil, endpointIP, labels)
+}
+
+func (n *krtNetworkManager) NetworkCtx(ctx krt.HandlerContext, endpointIP string, labels labels.Instance) network.ID {
 	// TODO(sschepns): move label checking out of here
 	// 1. check the pod/workloadEntry label
 	if nw := labels[label.TopologyNetwork.Name]; nw != "" {
@@ -70,9 +83,6 @@ func (n *krtNetworkManager) Network(ctx krt.HandlerContext, endpointIP string, l
 
 	// 2. check the system namespace labels
 	res := krt.FetchOrList(ctx, n.MeshNetworkInfo.AsCollection())
-	if len(res) > 1 {
-		panic("FetchOne found for more than 1 item")
-	}
 	var meshNetworkInfo MeshNetworkInfo
 	if len(res) == 1 {
 		meshNetworkInfo = res[0]
@@ -147,8 +157,9 @@ func NetworkGateways(
 	services krt.Collection[*model.Service],
 	meshNetworkInfo krt.Singleton[MeshNetworkInfo],
 	clusterID cluster.ID,
-	client kubelib.Client,
+	gateways krt.Collection[*gatewayv1.Gateway],
 	discoverRemoteGatewayResources bool,
+	features Features,
 	opts krt.OptionsBuilder,
 ) krt.Singleton[AggregateGateways] {
 	serviceGateways := krt.NewCollection(services, func(ctx krt.HandlerContext, svc *model.Service) *ServiceNetworkGateways {
@@ -213,9 +224,6 @@ func NetworkGateways(
 		}, opts.WithName("NetworkGateways")...)
 	}
 
-	gatewayClient := kclient.NewDelayedInformer[*gatewayv1.Gateway](client, gvr.KubernetesGateway, kubetypes.StandardInformer, kubetypes.Filter{})
-	gatewayClient.Start(opts.Stop())
-	gateways := krt.WrapClient(gatewayClient, opts.WithName("informer/Gateways")...)
 	gatewayBased := krt.NewCollection(gateways, func(ctx krt.HandlerContext, gw *gatewayv1.Gateway) *ServiceNetworkGateways {
 		if nw := gw.GetLabels()[label.TopologyNetwork.Name]; nw == "" {
 			return nil

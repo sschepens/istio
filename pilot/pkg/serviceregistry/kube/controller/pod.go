@@ -134,7 +134,7 @@ func GetPodConditionFromList(conditions []v1.PodCondition, conditionType v1.PodC
 	return -1, nil
 }
 
-func (pc *PodCache) labelFilter(old, cur *v1.Pod) bool {
+func labelFilter(old, cur *v1.Pod) bool {
 	// If labels/annotations updated, trigger proxy push
 	labelsChanged := !maps.Equal(old.Labels, cur.Labels)
 	// Annotations are only used in endpoints in one case, so just compare that one
@@ -175,7 +175,7 @@ func (pc *PodCache) onEvent(old, pod *v1.Pod, ev model.Event) error {
 			}
 			ev = model.EventDelete
 		} else if shouldPodBeInEndpoints(pod) && IsPodReady(pod) {
-			labelUpdated := pc.labelFilter(old, pod)
+			labelUpdated := labelFilter(old, pod)
 			pc.addPod(pod, ip, key, labelUpdated)
 		} else {
 			return nil

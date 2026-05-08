@@ -28,7 +28,7 @@ import (
 
 // EndpointBuilder is a stateful IstioEndpoint builder with metadata used to build IstioEndpoint
 type EndpointBuilder struct {
-	controller controllerInterface
+	networkFn func(endpointIP string, labels labels.Instance) network.ID
 
 	labels         labels.Instance
 	metaNetwork    network.ID
@@ -67,7 +67,7 @@ func (c *Controller) NewEndpointBuilder(pod *v1.Pod) *EndpointBuilder {
 	}
 	dm, _ := kubeUtil.GetWorkloadMetaFromPod(pod)
 	out := &EndpointBuilder{
-		controller:     c,
+		networkFn:      c.Network,
 		serviceAccount: sa,
 		locality: model.Locality{
 			Label:     locality,
@@ -132,5 +132,5 @@ func (b *EndpointBuilder) endpointNetwork(endpointIP string) network.ID {
 		return b.metaNetwork
 	}
 
-	return b.controller.Network(endpointIP, b.labels)
+	return b.networkFn(endpointIP, b.labels)
 }
