@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/util/xdsfake"
 	"istio.io/istio/pkg/config/constants"
+	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/config/schema/gvr"
@@ -60,12 +62,12 @@ func newTestKrtNetworkManager(t *testing.T, meshNetworks meshwatcher.TestNetwork
 
 	opts := krt.NewOptionsBuilder(stop, "", krt.GlobalDebugHandler)
 
-	client.RunAndWait(stop)
-
 	gatewayClient := kclient.NewDelayedInformer[*gatewayv1.Gateway](client, gvr.KubernetesGateway, kubetypes.StandardInformer, kclient.Filter{
 		ObjectFilter: client.ObjectFilter(),
 	})
 	gateways := krt.WrapClient(gatewayClient, opts.WithName("informer/Gateways")...)
+
+	client.RunAndWait(stop)
 
 	n := newKrtNetworkManager(
 		services,
@@ -247,6 +249,154 @@ func addOrUpdateKrtGatewayResource(t *testing.T, client kubelib.Client, customPo
 func removeKrtGatewayResource(t *testing.T, client kubelib.Client) {
 	t.Helper()
 	clienttest.Wrap(t, kclient.New[*k8sv1.Gateway](client)).Delete("eastwest-gwapi", "istio-system")
+}
+
+// TestKrtMeshNetworksCIDRMatching mirrors TestMeshNetworksCIDRMatching from the
+// legacy network manager. It exercises the CIDR-based fallback tier of
+// krtNetworkManager.Network():
+//  1. an endpoint IP matching exactly one network → that network is returned
+//  2. an endpoint IP matching no network → empty
+//  3. an endpoint IP inside overlapping CIDRs → first match wins (warning logged)
+//
+// Networks intentionally omit fromRegistry so we isolate the CIDR tier; if
+// fromRegistry matched this cluster, NetworkFromMeshConfig would short-circuit
+// the CIDR lookup.
+func TestKrtMeshNetworksCIDRMatching(t *testing.T) {
+	meshNetworks := meshwatcher.NewFixedNetworksWatcher(&meshconfig.MeshNetworks{
+		Networks: map[string]*meshconfig.Network{
+			"net-a": {
+				Endpoints: []*meshconfig.Network_NetworkEndpoints{
+					{Ne: &meshconfig.Network_NetworkEndpoints_FromCidr{FromCidr: "10.10.0.0/16"}},
+				},
+			},
+			"net-b": {
+				Endpoints: []*meshconfig.Network_NetworkEndpoints{
+					{Ne: &meshconfig.Network_NetworkEndpoints_FromCidr{FromCidr: "10.20.0.0/16"}},
+				},
+			},
+			// Overlaps with net-a; cidranger returns both and the manager picks the first.
+			"net-overlap": {
+				Endpoints: []*meshconfig.Network_NetworkEndpoints{
+					{Ne: &meshconfig.Network_NetworkEndpoints_FromCidr{FromCidr: "10.10.5.0/24"}},
+				},
+			},
+		},
+	})
+	n, _, _ := newTestKrtNetworkManager(t, meshNetworks)
+
+	// 1. Exact match.
+	assert.Equal(t, n.Network("10.20.0.5", nil), "net-b")
+
+	// 2. No match.
+	assert.Equal(t, n.Network("192.168.10.10", nil), "")
+
+	// 3. Overlapping CIDRs: result is implementation-defined first-match.
+	got := n.Network("10.10.5.7", nil)
+	if got != "net-a" && got != "net-overlap" {
+		t.Fatalf("expected one of [net-a, net-overlap] for overlapping CIDRs, got %q", got)
+	}
+}
+
+// TestKrtNetworkGatewaysFromServiceAndGatewayResource mirrors its legacy
+// counterpart: gateways discovered through labeled Services and through
+// Kubernetes Gateway API resources are merged into a single, sorted set, and
+// duplicate Service contributions for the same (network, addr, port) collapse
+// inside the gateway Set.
+func TestKrtNetworkGatewaysFromServiceAndGatewayResource(t *testing.T) {
+	meshNetworks := meshwatcher.NewFixedNetworksWatcher(nil)
+	n, services, client := newTestKrtNetworkManager(t, meshNetworks)
+
+	// Two services with identical (addr, port) → must dedup in the gateway set.
+	addKrtLabeledServiceGatewayNamed(t, services, "gw-svc-a", "nw1", "10.0.0.1")
+	addKrtLabeledServiceGatewayNamed(t, services, "gw-svc-b", "nw1", "10.0.0.1")
+
+	// One Kubernetes Gateway resource on a distinct address, also for nw1.
+	passthrough := k8sv1.TLSModePassthrough
+	ipType := k8sv1.IPAddressType
+	clienttest.Wrap(t, kclient.New[*k8sv1.Gateway](client)).CreateOrUpdate(&k8sv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gw-resource",
+			Namespace: "istio-system",
+			Labels:    map[string]string{label.TopologyNetwork.Name: "nw1"},
+		},
+		Spec: k8sv1.GatewaySpec{
+			GatewayClassName: "istio",
+			Addresses:        []k8sv1.GatewaySpecAddress{{Type: &ipType, Value: "10.0.0.99"}},
+			Listeners: []k8sv1.Listener{{
+				Name: "tls",
+				TLS: &k8sv1.ListenerTLSConfig{
+					Mode: &passthrough,
+					Options: map[k8sv1.AnnotationKey]k8sv1.AnnotationValue{
+						constants.ListenerModeOption: constants.ListenerModeAutoPassthrough,
+					},
+				},
+				Port: 15443,
+			}},
+		},
+	})
+
+	assert.EventuallyEqual(t, func() []string {
+		gws := n.NetworkGateways()
+		out := make([]string, 0, len(gws))
+		for _, gw := range gws {
+			out = append(out, gwTriple(gw))
+		}
+		return out
+	}, []string{"nw1|10.0.0.1|15443", "nw1|10.0.0.99|15443"})
+}
+
+// TestKrtInvalidMeshNetworksConfig mirrors its legacy counterpart: a malformed
+// CIDR is skipped (logged & ignored) without panicking the manager, and other
+// valid networks declared in the same config continue to resolve normally.
+func TestKrtInvalidMeshNetworksConfig(t *testing.T) {
+	meshNetworks := meshwatcher.NewFixedNetworksWatcher(&meshconfig.MeshNetworks{
+		Networks: map[string]*meshconfig.Network{
+			"valid-net": {
+				Endpoints: []*meshconfig.Network_NetworkEndpoints{
+					{Ne: &meshconfig.Network_NetworkEndpoints_FromCidr{FromCidr: "172.16.0.0/16"}},
+				},
+			},
+			"bad-net": {
+				Endpoints: []*meshconfig.Network_NetworkEndpoints{
+					{Ne: &meshconfig.Network_NetworkEndpoints_FromCidr{FromCidr: "not a cidr"}},
+				},
+			},
+		},
+	})
+	n, _, _ := newTestKrtNetworkManager(t, meshNetworks)
+
+	assert.Equal(t, n.Network("172.16.5.5", nil), "valid-net")
+	assert.Equal(t, n.Network("10.0.0.1", nil), "")
+}
+
+// addKrtLabeledServiceGatewayNamed is a parameterized variant of
+// addKrtLabeledServiceGateway that allows naming the service and choosing its
+// external address — needed when the test wants to register multiple gateway
+// services with overlapping or distinct gateway data.
+func addKrtLabeledServiceGatewayNamed(t *testing.T, services krt.StaticCollection[*model.Service], name, nw, addr string) {
+	t.Helper()
+	svc := &model.Service{
+		Hostname: host.Name(name + ".istio-system.svc.cluster.local"),
+		Ports: model.PortList{
+			{Name: "tcp", Port: 15443, Protocol: protocol.TCP},
+		},
+		Attributes: model.ServiceAttributes{
+			Name:      name,
+			Namespace: "istio-system",
+			Labels: map[string]string{
+				label.TopologyNetwork.Name: nw,
+			},
+			K8sAttributes: model.K8sAttributes{
+				ObjectName: name,
+			},
+		},
+	}
+	svc.Attributes.ClusterExternalAddresses.SetAddressesFor(constants.DefaultClusterName, []string{addr})
+	services.UpdateObject(svc)
+}
+
+func gwTriple(gw model.NetworkGateway) string {
+	return string(gw.Network) + "|" + gw.Addr + "|" + strconv.FormatUint(uint64(gw.Port), 10)
 }
 
 func addKrtMeshNetworksFromRegistryGateway(
