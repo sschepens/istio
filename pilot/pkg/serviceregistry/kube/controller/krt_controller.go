@@ -656,7 +656,7 @@ func (c *KrtController) getProxyServiceTargetsFromMetadata(proxy *model.Proxy) (
 
 	// Find the Service associated with the pod.
 	services := c.outputs.JoinedServicesByNamespace.Lookup(proxy.ConfigNamespace)
-	slices.FilterInPlace(services, func(s *model.Service) bool {
+	services = slices.FilterInPlace(services, func(s *model.Service) bool {
 		return labels.Instance(s.Attributes.LabelSelectors).Match(proxy.Labels)
 	})
 	if len(services) == 0 {

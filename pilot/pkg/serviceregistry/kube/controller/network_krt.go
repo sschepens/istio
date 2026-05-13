@@ -346,20 +346,13 @@ func LocalMeshNetworkInfo(
 	clusterID cluster.ID,
 	opts krt.OptionsBuilder,
 ) krt.Singleton[MeshNetworkInfo] {
-	LocalSystemNamespaceNetwork := krt.NewSingleton(func(ctx krt.HandlerContext) *network.ID {
-		ns := ptr.Flatten(krt.FetchOne(ctx, localNamespaces, krt.FilterKey(systemNamespace)))
-		if ns == nil {
-			return nil
-		}
-		nw, f := ns.Labels[label.TopologyNetwork.Name]
-		if !f {
-			return nil
-		}
-		return ptr.Of(network.ID(nw))
-	}, opts.WithName("LocalSystemNamespaceNetwork")...)
-
 	return krt.NewSingleton(func(ctx krt.HandlerContext) *MeshNetworkInfo {
-		networkFromSystemNamespace := ptr.OrEmpty(krt.FetchOne(ctx, LocalSystemNamespaceNetwork.AsCollection()))
+		var networkFromSystemNamespace network.ID
+		if ns := ptr.Flatten(krt.FetchOne(ctx, localNamespaces, krt.FilterKey(systemNamespace))); ns != nil {
+			if nw, f := ns.Labels[label.TopologyNetwork.Name]; f {
+				networkFromSystemNamespace = network.ID(nw)
+			}
+		}
 		mni := MeshNetworkInfo{
 			NetworkFromSystemNamespace:  networkFromSystemNamespace,
 			RegistryServiceNameGateways: make(map[host.Name][]model.NetworkGateway),

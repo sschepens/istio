@@ -91,8 +91,8 @@ func (c *fakeClusterCollections) Gateways() krt.Collection[*gatewayv1.Gateway] {
 // kube state and the krt collections it consumes.
 type FakeKrtController struct {
 	*KrtController
+	*fakeClients
 	Endpoints   *model.EndpointIndex
-	Clients     *fakeClients
 	Collections *fakeClusterCollections
 }
 
@@ -239,8 +239,8 @@ func NewFakeKrtControllerWithOptions(t test.Failer, opts FakeKrtControllerOption
 
 	return &FakeKrtController{
 		KrtController: c,
+		fakeClients:   clients,
 		Endpoints:     endpoints,
-		Clients:       clients,
 		Collections:   collections,
 	}, fx
 }
