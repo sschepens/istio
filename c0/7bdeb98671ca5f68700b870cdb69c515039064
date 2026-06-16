@@ -1,0 +1,27 @@
+pkg/bootstrap/config.go
+  s_a396084695ec83::t_4258df70346350 210-213
+go.mod
+  s_a396084695ec83::t_b2e3b32a399bf1 236
+  s_a396084695ec83::t_3df4208c43dd07 237
+pkg/bootstrap/option/instances.go
+  s_a396084695ec83::t_a339d865c94f1e 247-250
+pkg/bootstrap/config_test.go
+  s_a396084695ec83::t_4b714f737701a8 366-397
+  s_a396084695ec83::t_ba81ba76e40b73 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "c07bdeb98671ca5f68700b870cdb69c515039064",
+  "prompts": {},
+  "sessions": {
+    "s_a396084695ec83": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21236d8b-ba8c-445a-b72c-1b0eea477884",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
