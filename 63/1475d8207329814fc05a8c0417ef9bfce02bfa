@@ -1,0 +1,73 @@
+pilot/pkg/xds/eds_test.go
+  s_a0170725e0f94c::t_0bf63f63d6f95d 1579-1629
+  s_a0170725e0f94c::t_874309b640f3b1 1826-1827,1833,1845,1848,1851-1858,1861-1862,1864-1875,1877-1885
+  s_a0170725e0f94c::t_000a379af377ff 1666-1800
+  s_a0170725e0f94c::t_12810916139e15 1557,1559
+  s_a0170725e0f94c::t_baa250218870b6 1665,1801-1822,1828-1832,1834-1844,1846-1847,1849-1850,1859-1860,1863,1876,1886-1915,1917-1920,1922-1923
+  s_a0170725e0f94c::t_956502964304ba 1450-1487,1489,1491-1499,1501,1503-1556,1558,1560-1578,1630
+  s_a0170725e0f94c::t_da6e8f313f9ddf 34
+  s_a0170725e0f94c::t_d8f11c0f4e38af 1823-1825
+  s_a0170725e0f94c::t_05adc3c7301d55 55
+  s_a0170725e0f94c::t_a81b5186672b71 1631-1664
+  s_a0170725e0f94c::t_f4ddd5829e2ae1 1916,1921
+  s_a0170725e0f94c::t_453f1265c2e796 1488,1490,1500,1502
+pilot/pkg/xds/eds.go
+  s_a0170725e0f94c::t_d6cee55c4a9415 239-243
+  s_a0170725e0f94c::t_1812dc97ea4721 238
+  s_a0170725e0f94c::t_0589bd6826ee99 209-213,215,223
+  s_a0170725e0f94c::t_76f9004dd92f76 284
+  s_a0170725e0f94c::t_a3569886403943 217
+  s_a0170725e0f94c::t_f577f5db8412af 283,286,295,300,303
+  s_a0170725e0f94c::t_91491ec6367d38 281,292-294,296-298,301-302
+  s_a0170725e0f94c::t_064d6fbf5bc513 226,228
+go.mod
+  s_a0170725e0f94c::t_6f952ddfe02c5a 237
+  s_a396084695ec83::t_b2e3b32a399bf1 236
+pkg/config/validation/agent/validation.go
+  s_a0170725e0f94c::t_3f7cbaab72c177 585-633
+pkg/bootstrap/config_test.go
+  s_a396084695ec83::t_4b714f737701a8 366-397
+  s_a396084695ec83::t_ba81ba76e40b73 27
+pkg/config/validation/validation_test.go
+  s_a0170725e0f94c::t_376cafda218faf 3649-3668
+pkg/bootstrap/config.go
+  s_a396084695ec83::t_4258df70346350 210-213
+pkg/config/validation/agent/validation_test.go
+  s_a0170725e0f94c::t_178237f91d4cb9 22
+  s_a0170725e0f94c::t_b09e76220b72c9 1373-1519
+pkg/bootstrap/option/instances.go
+  s_a396084695ec83::t_a339d865c94f1e 247-250
+pilot/pkg/model/context.go
+  s_a0170725e0f94c::t_d9033f09bd628c 620-622
+  s_a0170725e0f94c::t_048583a29f8d6e 619
+  s_a0170725e0f94c::t_4d705c1ac1aa46 368-374
+tools/packaging/common/envoy_bootstrap.json
+  s_a0170725e0f94c::t_3ab2f2b1f85517 1104,1107-1109
+  s_a0170725e0f94c::t_dc9b6e9b16b6cd 1113,1116,1118
+pkg/config/validation/validation.go
+  s_a0170725e0f94c::t_899ebff1c7c94e 1247-1249,1251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "631475d8207329814fc05a8c0417ef9bfce02bfa",
+  "prompts": {},
+  "sessions": {
+    "s_a0170725e0f94c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e84ec35b-7ba1-4059-88c7-d26d45669b4d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    },
+    "s_a396084695ec83": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21236d8b-ba8c-445a-b72c-1b0eea477884",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
