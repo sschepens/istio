@@ -1,0 +1,45 @@
+pkg/config/mesh/mesh_test.go
+  s_a0170725e0f94c::t_a008033bcc0e1b 280-357
+pilot/pkg/networking/core/cluster_traffic_policy_test.go
+  s_a0170725e0f94c::t_304243809d9016 24,27,30,33
+  s_a0170725e0f94c::t_6f86901a5c12bf 231-340
+pilot/pkg/xds/endpoints/endpoint_builder.go
+  s_a0170725e0f94c::t_b6add6b84b48da 178-180,182-196
+  s_a0170725e0f94c::t_9cfc8d0f0ce141 443-447,449,459-463
+pilot/pkg/xds/eds_test.go
+  s_a0170725e0f94c::t_0323a2f5ba0632 1924-2002,2008-2025
+  s_a0170725e0f94c::t_eba58e9fd5655b 2003-2007
+pkg/config/mesh/mesh.go
+  s_a0170725e0f94c::t_699860737efec3 254-265
+pilot/pkg/networking/core/loadbalancer/loadbalancer.go
+  s_a0170725e0f94c::t_35c346b219909f 40-55,57-59,61,64,70-71,85,97,102-114
+  s_a0170725e0f94c::t_e26977e3f8f8c7 117-124,129-141,204
+  s_a0170725e0f94c::t_600c403050c1af 125-128,151-203
+  s_a0170725e0f94c::t_c60811cc9c71a6 142-150
+pilot/pkg/networking/core/cluster_traffic_policy.go
+  s_a0170725e0f94c::t_a7553910e371b6 279-280,282-292
+  s_a0170725e0f94c::t_911047900ba7d6 326-354
+pilot/pkg/networking/core/loadbalancer/loadbalancer_test.go
+  s_a0170725e0f94c::t_0d0498ebdc092d 1003,1012,1019-1042,1044-1051,1054,1057-1059,1062-1064,1067-1069,1072-1075,1078-1082,1085-1089,1092-1149,1152-1155,1158-1162,1165-1174,1179-1184,1186-1187
+  s_a0170725e0f94c::t_4a5d9a1f8ec041 1013-1018
+  s_a0170725e0f94c::t_1f257340c39f34 1185
+  s_a0170725e0f94c::t_e6fd931e685242 1193-1198,1200-1202,1206,1210-1226,1228-1232,1253-1294
+  s_a0170725e0f94c::t_2e35064d023e79 1199,1203-1205,1207-1209
+  s_a0170725e0f94c::t_6cebe725816cb7 1227,1233-1252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "c03c2ac42c367a0bfc9e490e4fe102624bfad26a",
+  "prompts": {},
+  "sessions": {
+    "s_a0170725e0f94c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e84ec35b-7ba1-4059-88c7-d26d45669b4d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
