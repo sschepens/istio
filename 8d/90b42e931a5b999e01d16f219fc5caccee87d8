@@ -1,0 +1,42 @@
+pilot/cmd/pilot-agent/options/options.go
+  s_050b05c4d66d5e::t_cc1bd3d70e2451 99-104
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_050b05c4d66d5e::t_36dd3f235caa6d 53
+  s_050b05c4d66d5e::t_04fd8debb002cc 252
+  s_050b05c4d66d5e::t_75253c8ababa5e 240-241
+pkg/bootstrap/config.go
+  s_050b05c4d66d5e::t_c9023cb64cd063 210
+pilot/pkg/networking/core/cluster_waypoint.go
+  s_050b05c4d66d5e::t_9733a43082c61e 207,227
+tests/integration/pilot/zoneawarelb/main_test.go
+  s_050b05c4d66d5e::t_bfe6084459b48e 34-35,40-45
+pilot/pkg/networking/core/cluster_test.go
+  s_050b05c4d66d5e::t_f176bec749dd73 2599
+pkg/bootstrap/config_test.go
+  s_050b05c4d66d5e::t_ed6251ce95aabb 369-370,372-373,377-380,383
+pilot/pkg/networking/core/cluster_traffic_policy.go
+  s_050b05c4d66d5e::t_7640b90900cda8 57-61,274,293-294,296,343,346-352
+  s_050b05c4d66d5e::t_b9fbbe635b23d3 275
+  s_050b05c4d66d5e::t_4317d8dc11df3c 295
+  s_050b05c4d66d5e::t_b26c4baeecb2af 56
+  s_050b05c4d66d5e::t_1f1eed818b96cd 344
+pilot/pkg/networking/core/cluster_traffic_policy_test.go
+  s_050b05c4d66d5e::t_c1515f03709cbb 253,259,269,272,282,288-291,298,314,327
+  s_050b05c4d66d5e::t_2a3dbae29b970e 231,233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "8d90b42e931a5b999e01d16f219fc5caccee87d8",
+  "prompts": {},
+  "sessions": {
+    "s_050b05c4d66d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63fdc442-892f-40fd-be91-56ba002a9ddf",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
