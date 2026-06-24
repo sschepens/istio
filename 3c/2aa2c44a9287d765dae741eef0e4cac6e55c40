@@ -1,0 +1,38 @@
+pilot/pkg/model/service_test.go
+  s_fcc9ffe8d031b6::t_03b693aaffb14f 1073,1076
+  s_fcc9ffe8d031b6::t_3612a2292d27b3 1071-1072,1074-1075,1077-1136
+pilot/pkg/xds/eds_test.go
+  s_fcc9ffe8d031b6::t_2b72d1d02bfa21 688-711
+  s_fcc9ffe8d031b6::t_41468a9a10ee45 457
+pilot/pkg/networking/core/cluster_builder_test.go
+  s_fcc9ffe8d031b6::t_2ba3f4e24bdf46 1248
+  s_fcc9ffe8d031b6::t_fd30fe5e256ebf 1336
+  s_fcc9ffe8d031b6::t_3f6820c4031b73 1191
+  s_fcc9ffe8d031b6::t_7d13269ffd805b 1316
+pilot/pkg/networking/core/cluster_test.go
+  s_fcc9ffe8d031b6::t_daad9c7cfeaced 29
+  s_fcc9ffe8d031b6::t_16389ee3185fab 2579,2585,2587
+  s_fcc9ffe8d031b6::t_81fb0d5b040f7f 2492-2494
+  s_fcc9ffe8d031b6::t_8ecf64a3cd7c55 56
+  s_fcc9ffe8d031b6::t_0da5bd6af3d672 2574-2578,2580-2584,2586,2588
+  s_fcc9ffe8d031b6::t_a619df0bd72b45 2601,2607-2608
+  s_fcc9ffe8d031b6::t_00e04420445362 2609,2632-2638
+pilot/pkg/xds/endpoints/endpoint_builder_test.go
+  s_fcc9ffe8d031b6::t_ad96387deb1301 559-646
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "3c2aa2c44a9287d765dae741eef0e4cac6e55c40",
+  "prompts": {},
+  "sessions": {
+    "s_fcc9ffe8d031b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a720423f-bc3c-4fe7-aeea-b1009a2828f5",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
