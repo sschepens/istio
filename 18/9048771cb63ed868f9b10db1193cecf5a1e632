@@ -1,0 +1,23 @@
+pilot/pkg/xds/endpoints/endpoint_builder.go
+  s_fcc9ffe8d031b6::t_e1b839e90b107d 224-227
+  s_fcc9ffe8d031b6::t_178aa7102f8b9a 167-169
+pilot/pkg/xds/endpoints/endpoint_builder_test.go
+  s_fcc9ffe8d031b6::t_049035874778af 632
+  s_fcc9ffe8d031b6::t_1751374b81cc89 634,637
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "189048771cb63ed868f9b10db1193cecf5a1e632",
+  "prompts": {},
+  "sessions": {
+    "s_fcc9ffe8d031b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a720423f-bc3c-4fe7-aeea-b1009a2828f5",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
