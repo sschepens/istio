@@ -1,0 +1,20 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_a0170725e0f94c::t_04fca11067ca2d 215-217,223,257-258,260-262,264-273,275
+  s_a0170725e0f94c::t_63febfe692b994 24-27,32,42-46,148,198-207,214,218-222,224-256,259,263,274,276-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "034936dddead672ccae61a0f7f40926081c55aa0",
+  "prompts": {},
+  "sessions": {
+    "s_a0170725e0f94c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e84ec35b-7ba1-4059-88c7-d26d45669b4d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}

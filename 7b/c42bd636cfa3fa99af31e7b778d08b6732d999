@@ -1,0 +1,24 @@
+pkg/kube/inject/inject.go
+  s_a0170725e0f94c::t_cdbd0f70917dad 120
+  s_a0170725e0f94c::t_f8ad73505c7fcd 497
+pkg/kube/inject/inject_test.go
+  s_a0170725e0f94c::t_0f8d8cf9a2d0fe 1212-1296
+manifests/charts/istio-control/istio-discovery/files/injection-template.yaml
+  s_a0170725e0f94c::t_bbe2190a9a9ce8 361-364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "7bc42bd636cfa3fa99af31e7b778d08b6732d999",
+  "prompts": {},
+  "sessions": {
+    "s_a0170725e0f94c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e84ec35b-7ba1-4059-88c7-d26d45669b4d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_2e12c4e29e9b3f::t_7a1d6c7db4331b 154,179-180
+  s_2e12c4e29e9b3f::t_1dafa869799483 249,264,306-307,317-320
+  s_2e12c4e29e9b3f::t_a1cbbed5ae1a68 198-199,210,212,375-379,381
+  s_2e12c4e29e9b3f::t_deefd973b9e41e 39-43,54-55,76-78,113,133-134,149-153,155,158-161,164-166,172-174,176-178,181-186,188,193-197,200-209,211,214-217,222-224,226,238-239,252
+  s_2e12c4e29e9b3f::t_fb354d0fc13989 75
+  s_2e12c4e29e9b3f::t_bfc51dee27afdd 232,234
+  s_2e12c4e29e9b3f::t_1523e0a10506e2 135-136,236-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "f259127edfefa9bd57d869184e9cfcff4f0f5a84",
+  "prompts": {},
+  "sessions": {
+    "s_2e12c4e29e9b3f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ef4e9-4c6f-7f93-bc01-91daf60650ec",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    }
+  }
+}
