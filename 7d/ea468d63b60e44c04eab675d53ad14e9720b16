@@ -1,0 +1,27 @@
+pilot/pkg/networking/core/loadbalancer/loadbalancer.go
+  s_82d493627ab2df::t_76727946b3d445 68-70
+  s_82d493627ab2df::t_45d77bc5dcefad 61-63
+  s_82d493627ab2df::t_0929dd4511c1c1 64-67
+  s_82d493627ab2df::t_96676f00cb3a9f 60
+  s_82d493627ab2df::t_0cd982d0471230 71-73
+pilot/pkg/networking/core/loadbalancer/loadbalancer_test.go
+  s_82d493627ab2df::t_507df4bde578e7 1117,1124,1127-1134
+  s_82d493627ab2df::t_029f21fb0ff719 1176-1183
+  s_82d493627ab2df::t_5de08475131589 1158-1166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "7dea468d63b60e44c04eab675d53ad14e9720b16",
+  "prompts": {},
+  "sessions": {
+    "s_82d493627ab2df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d57284-0cb8-44d4-b406-dd38d8d88d37",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
