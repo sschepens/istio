@@ -1,0 +1,19 @@
+manifests/charts/istio-control/istio-discovery/files/profile-compatibility-version-1.30.yaml
+  s_eff98a7fb55e20::t_032112d02d4c38 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "f5c9d7f160beeb0f0d2fb487277a1944f7d9bcea",
+  "prompts": {},
+  "sessions": {
+    "s_eff98a7fb55e20": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eff43-0441-7661-9660-67570d4dfe79",
+        "model": "gpt-5.5"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
