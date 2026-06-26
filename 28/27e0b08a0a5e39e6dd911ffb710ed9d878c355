@@ -1,0 +1,19 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_b751f07f984c09::t_afdfd5e66d28ca 124-126,142-144,161,179,288,321,336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "2827e0b08a0a5e39e6dd911ffb710ed9d878c355",
+  "prompts": {},
+  "sessions": {
+    "s_b751f07f984c09": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0477-1898-7283-9b73-ef9477acca37",
+        "model": "gpt-5.5"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
