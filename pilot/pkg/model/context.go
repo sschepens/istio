@@ -365,13 +365,10 @@ type Proxy struct {
 	// would have 6 entries.
 	ServiceTargets []ServiceTarget
 
-	// LocalService is the hostname of the local service associated with the proxy. It is populated
-	// in SetServiceTargets from the first entry in ServiceTargets, or empty if there is none.
-	LocalService host.Name
-
-	// PrevLocalService is the value of LocalService prior to the most recent SetServiceTargets call,
-	// used to detect local-service transitions during incremental pushes.
-	PrevLocalService host.Name
+	// LocalService is set by SetServiceTargets to true whenever the set of services selecting the
+	// proxy changed since the previous call. It is cleared by the EDS push once the local cluster
+	// has been re-evaluated.
+	LocalServiceTargetsChanged bool
 
 	// Istio version associated with the Proxy
 	IstioVersion *IstioVersion
@@ -616,12 +613,25 @@ func (node *Proxy) SetServiceTargets(serviceDiscovery ServiceDiscovery) {
 		return -1
 	})
 
-	node.PrevLocalService = node.LocalService
-	node.LocalService = ""
-	if len(instances) > 0 {
-		node.LocalService = instances[0].Service.Hostname
-	}
+	node.LocalServiceTargetsChanged = selectingServicesChanged(node.ServiceTargets, instances)
 	node.ServiceTargets = instances
+}
+
+// selectingServicesChanged reports whether two ServiceTarget slices select a different set of
+// services, compared by hostname.
+func selectingServicesChanged(a, b []ServiceTarget) bool {
+	return !selectingServiceKeys(a).Equal(selectingServiceKeys(b))
+}
+
+func selectingServiceKeys(sts []ServiceTarget) sets.Set[string] {
+	out := sets.New[string]()
+	for _, st := range sts {
+		if st.Service == nil {
+			continue
+		}
+		out.Insert(string(st.Service.Hostname))
+	}
+	return out
 }
 
 // SetWorkloadLabels will set the node.Labels.

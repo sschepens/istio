@@ -62,6 +62,22 @@ const connectOriginate = "connect_originate"
 // Duplicated from networking/core/waypoint.go to avoid import cycle
 const forwardInnerConnect = "forward_inner_connect"
 
+const (
+	// localClusterPortName is the dummy ServicePortName applied to every endpoint in the local
+	// cluster. The local cluster is a source-topology reference, never a routable target.
+	localClusterPortName = "local"
+
+	// LocalClusterPortNumber is the dummy port used by the local_cluster. It is inert for
+	// zone-aware routing because the local cluster is never routed to directly; the
+	// address-dedupe makes the value irrelevant.
+	LocalClusterPortNumber = 1
+)
+
+// defaultLocalClusterGroupingLabelNames is the default set of pod labels used to group the instances
+// that belong to the same local cluster. `pod-template-hash` pins the local cluster to the proxy's
+// own ReplicaSet, and keeps old/new ReplicaSets in disjoint groups during a canary.
+var defaultLocalClusterGroupingLabelNames = []string{"pod-template-hash"}
+
 type EndpointBuilder struct {
 	// These fields define the primary key for an endpoint, and can be used as a cache key
 	clusterName            string
@@ -89,6 +105,9 @@ type EndpointBuilder struct {
 
 	canonicalServiceForMeshExternal bool
 	isLocalCluster                  bool
+
+	localClusterServices           []*model.Service
+	localClusterGroupingLabelNames []string
 }
 
 func NewEndpointBuilder(clusterName string, proxy *model.Proxy, push *model.PushContext) EndpointBuilder {
@@ -133,7 +152,6 @@ func NewCDSEndpointBuilder(
 		dir:        dir,
 
 		canonicalServiceForMeshExternal: features.CanonicalServiceForMeshExternalServiceEntry,
-		isLocalCluster:                  clusterName == "local_cluster",
 	}
 	b.populateSubsetInfo()
 	b.populateFailoverPriorityLabels()
@@ -314,16 +332,22 @@ func (b *EndpointBuilder) DependentConfigs() []model.ConfigHash {
 			}.HashCode())
 		}
 	}
-	if b.service != nil {
+	// For the local cluster the output depends on the endpoint shards of *every* selecting
+	// service, so a change to any of them must invalidate the cache entry.
+	services := b.localClusterServices
+	if len(services) == 0 {
+		services = []*model.Service{b.service}
+	}
+	for _, svc := range services {
 		configs = append(
 			configs,
 			model.ConfigKey{
 				Kind: kind.ServiceEntry,
-				Name: string(b.service.Hostname), Namespace: b.service.Attributes.Namespace,
+				Name: string(svc.Hostname), Namespace: svc.Attributes.Namespace,
 			}.HashCode(),
 			model.ConfigKey{
 				Kind: kind.Endpoints,
-				Name: string(b.service.Hostname), Namespace: b.service.Attributes.Namespace,
+				Name: string(svc.Hostname), Namespace: svc.Attributes.Namespace,
 			}.HashCode(),
 		)
 	}
@@ -386,6 +410,10 @@ func (b *EndpointBuilder) IstioEndpoints() []*model.IstioEndpoint {
 // BuildClusterLoadAssignment converts the shards for this EndpointBuilder's Service
 // into a ClusterLoadAssignment. Used for EDS.
 func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.EndpointIndex) *endpoint.ClusterLoadAssignment {
+	if b.isLocalCluster {
+		return b.buildClusterLoadAssignmentForLocalCluster(endpointIndex)
+	}
+
 	svcPort := b.servicePort(b.port)
 	if svcPort == nil {
 		return buildEmptyClusterLoadAssignment(b.clusterName)
@@ -398,7 +426,7 @@ func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.Endpoi
 		if waypointEps, f := b.findServiceWaypoint(endpointIndex); f {
 			// endpoints are from waypoint service but the envoy endpoint is different envoy cluster
 			locLbEps := b.generate(waypointEps, true)
-			return b.createClusterLoadAssignment(locLbEps)
+			return b.createClusterLoadAssignment(b.clusterName, locLbEps)
 		}
 	}
 
@@ -432,7 +460,7 @@ func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.Endpoi
 		return buildEmptyClusterLoadAssignment(b.clusterName)
 	}
 
-	l := b.createClusterLoadAssignment(localityLbEndpoints)
+	l := b.createClusterLoadAssignment(b.clusterName, localityLbEndpoints)
 
 	// If locality aware routing is enabled, prioritize endpoints or set their lb weight.
 	// Failover should only be enabled when there is an outlier detection, otherwise Envoy
@@ -601,26 +629,6 @@ func (b *EndpointBuilder) filterIstioEndpoint(ep *model.IstioEndpoint) bool {
 		return false
 	}
 
-	// If this is the self discovery cluster, then we only need endpoints from the same workload and the same region
-	if b.isLocalCluster {
-		if b.proxy.Metadata.WorkloadName != ep.WorkloadName {
-			return false
-		}
-
-		// similar to GetDeployMetaFromPod but reversed, we need to find the same ReplicaSet for this proxy
-		if b.proxy.Labels["pod-template-hash"] != ep.Labels["pod-template-hash"] {
-			return false
-		}
-		if b.proxy.Labels["rollouts-pod-template-hash"] != ep.Labels["rollouts-pod-template-hash"] {
-			return false
-		}
-
-		locality := util.ConvertLocality(ep.Locality.Label)
-		if b.locality != nil && b.locality.Region != locality.Region {
-			return false
-		}
-	}
-
 	return true
 }
 
@@ -682,13 +690,13 @@ func (b *EndpointBuilder) findShards(endpointIndex *model.EndpointIndex) *model.
 }
 
 // Create the CLusterLoadAssignment. At this moment the options must have been applied to the locality lb endpoints.
-func (b *EndpointBuilder) createClusterLoadAssignment(llbOpts []*LocalityEndpoints) *endpoint.ClusterLoadAssignment {
+func (b *EndpointBuilder) createClusterLoadAssignment(clusterName string, llbOpts []*LocalityEndpoints) *endpoint.ClusterLoadAssignment {
 	llbEndpoints := make([]*endpoint.LocalityLbEndpoints, 0, len(llbOpts))
 	for _, l := range llbOpts {
 		llbEndpoints = append(llbEndpoints, &l.llbEndpoints)
 	}
 	return &endpoint.ClusterLoadAssignment{
-		ClusterName: b.clusterName,
+		ClusterName: clusterName,
 		Endpoints:   llbEndpoints,
 	}
 }
@@ -1008,4 +1016,188 @@ func isEastWestGateway(node *model.Proxy) bool {
 
 func isSidecarProxy(node *model.Proxy) bool {
 	return node != nil && node.Type == model.SidecarProxy
+}
+
+// ServicesForLocalCluster returns the deduplicated set of services that select the proxy, sorted by
+// hostname (then namespace) for stable output and cache keys. It is derived directly from the
+// registry-populated proxy.ServiceTargets, so it works for k8s Services, ServiceEntries, and VM
+// WorkloadEntries without depending on any label or DNS-name construction.
+func ServicesForLocalCluster(proxy *model.Proxy) []*model.Service {
+	seen := make(map[string]struct{})
+	var svcs []*model.Service
+	for _, st := range proxy.ServiceTargets {
+		if st.Service == nil {
+			continue
+		}
+		// ServiceTargets carries one entry per service-port; dedupe by hostname.
+		key := string(st.Service.Hostname)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		svcs = append(svcs, st.Service)
+	}
+	sort.Slice(svcs, func(i, j int) bool {
+		return svcs[i].Hostname < svcs[j].Hostname
+	})
+	return svcs
+}
+
+// HostnamesForLocalCluster returns the sorted hostnames of every service that selects the proxy.
+// Used by incremental-push detection so a change to any selecting service triggers a local_cluster
+// recomputation.
+func HostnamesForLocalCluster(proxy *model.Proxy) []string {
+	svcs := ServicesForLocalCluster(proxy)
+	out := make([]string, 0, len(svcs))
+	for _, svc := range svcs {
+		out = append(out, string(svc.Hostname))
+	}
+	return out
+}
+
+// groupingLabelNamesForLocalCluster resolves the configurable grouping label list, defaulting to
+// pod-template-hash when the proxy does not override it.
+func groupingLabelNamesForLocalCluster(proxy *model.Proxy) []string {
+	if proxy.Metadata.SelfDiscoveryGroupingLabelNames != "" {
+		return strings.Split(proxy.Metadata.SelfDiscoveryGroupingLabelNames, ",")
+	}
+	return defaultLocalClusterGroupingLabelNames
+}
+
+// groupingKeyForLocalCluster builds the deterministic grouping key for a label set, e.g.
+// "pod-template-hash:abc123" or "app.kubernetes.io/instance:x,app.kubernetes.io/version:1".
+func groupingKeyForLocalCluster(groupingLabelNames []string, labels map[string]string) string {
+	var builder strings.Builder
+	for i, labelName := range groupingLabelNames {
+		if i > 0 {
+			builder.WriteString(",")
+		}
+		builder.WriteString(labelName)
+		builder.WriteString(":")
+		builder.WriteString(labels[labelName])
+	}
+	return builder.String()
+}
+
+// NewEndpointBuilderForLocalCluster builds the EndpointBuilder for the local_cluster used by
+// Envoy zone-aware routing. Unlike the normal builder, it carries the full set of services that
+// select the proxy (rather than a single one) and a configurable grouping key. The composite
+// clusterName is internal-only; it incorporates the grouping key and the sorted service hostnames
+// so cache entries do not collide. The emitted ClusterLoadAssignment.ClusterName is always the
+// literal model.LocalClusterName.
+func NewEndpointBuilderForLocalCluster(proxy *model.Proxy, push *model.PushContext) EndpointBuilder {
+	groupingLabelNames := groupingLabelNamesForLocalCluster(proxy)
+	services := ServicesForLocalCluster(proxy)
+
+	// Piggyback the grouping key on subsetName (the local cluster uses no subset); it then flows
+	// into the cache key via clusterName without touching the subset-matching path.
+	subsetName := groupingKeyForLocalCluster(groupingLabelNames, proxy.Labels)
+
+	// Sorted, comma-joined hostnames make the cache key encode the full service set.
+	hostnames := make([]string, 0, len(services))
+	for _, svc := range services {
+		hostnames = append(hostnames, string(svc.Hostname))
+	}
+	clusterName := strings.Join([]string{
+		string(model.TrafficDirectionOutbound),
+		strconv.Itoa(LocalClusterPortNumber),
+		subsetName,
+		strings.Join(hostnames, ","),
+	}, "|")
+
+	// The first service (if any) is used only as the builder's primary service so that
+	// ServiceFound()/Cacheable()/generate() behave correctly; generation unions all services.
+	var primary *model.Service
+	if len(services) > 0 {
+		primary = services[0]
+	}
+
+	b := NewCDSEndpointBuilder(
+		proxy, push, clusterName,
+		model.TrafficDirectionOutbound, subsetName, "", LocalClusterPortNumber,
+		primary, nil,
+	)
+	b.isLocalCluster = true
+	b.localClusterServices = services
+	b.localClusterGroupingLabelNames = groupingLabelNames
+	return *b
+}
+
+// filterIstioEndpointForLocalCluster keeps only endpoints that share the proxy's grouping key and
+// collapses pods selected by multiple services/ports to a single endpoint (by first address).
+func (b *EndpointBuilder) filterIstioEndpointForLocalCluster(ep *model.IstioEndpoint, addrsMap map[string]struct{}) bool {
+	if b.subsetName != groupingKeyForLocalCluster(b.localClusterGroupingLabelNames, ep.Labels) {
+		return false
+	}
+
+	// Envoy's zone-aware routing logic keys only on zone, so a cross-region endpoint with a
+	// coincidentally matching zone name would be miscounted. Scope the local cluster to the proxy's
+	// own region to keep the source-topology zone distribution correct.
+	locality := util.ConvertLocality(ep.Locality.Label)
+	if b.locality != nil && b.locality.Region != "" && b.locality.Region != locality.Region {
+		return false
+	}
+
+	key := ep.FirstAddressOrNil()
+	if _, ok := addrsMap[key]; ok {
+		return false
+	}
+	addrsMap[key] = struct{}{}
+	return true
+}
+
+// copyIstioEndpointForLocalCluster returns a deep copy of ep rewritten to the inert dummy port so
+// the local cluster is not coupled to any one (volatile) ServicePort.
+func copyIstioEndpointForLocalCluster(ep *model.IstioEndpoint) *model.IstioEndpoint {
+	ret := ep.DeepCopy()
+	ret.ServicePortName = localClusterPortName
+	ret.EndpointPort = LocalClusterPortNumber
+	return ret
+}
+
+// snapshotShardsForLocalCluster unions the endpoint shards across every selecting service into a
+// single stable slice. It mirrors snapshotShards but iterates the full service set instead of a
+// single primary service.
+func (b *EndpointBuilder) snapshotShardsForLocalCluster(endpointIndex *model.EndpointIndex) []*model.IstioEndpoint {
+	var eps []*model.IstioEndpoint
+	for _, svc := range b.localClusterServices {
+		shards, ok := endpointIndex.ShardsForService(string(svc.Hostname), svc.Attributes.Namespace)
+		if !ok {
+			continue
+		}
+		isClusterLocal := b.push.IsClusterLocal(svc)
+		shards.RLock()
+		for _, shardKey := range shards.Keys() {
+			if shardKey.Cluster != b.clusterID {
+				if isClusterLocal || svc.Attributes.NodeLocal {
+					continue
+				}
+			}
+			eps = append(eps, shards.Shards[shardKey]...)
+		}
+		shards.RUnlock()
+	}
+	return eps
+}
+
+// buildClusterLoadAssignmentForLocalCluster generates the local_cluster ClusterLoadAssignment by
+// unioning all selecting services, narrowing to the proxy's grouping key, deduping by address, and
+// rewriting to the inert dummy port. The result always carries the literal model.LocalClusterName.
+func (b *EndpointBuilder) buildClusterLoadAssignmentForLocalCluster(endpointIndex *model.EndpointIndex) *endpoint.ClusterLoadAssignment {
+	if len(b.localClusterServices) == 0 {
+		return buildEmptyClusterLoadAssignment(model.LocalClusterName)
+	}
+	addrsMap := make(map[string]struct{})
+	svcEps := b.snapshotShardsForLocalCluster(endpointIndex)
+	svcEps = slices.FilterInPlace(svcEps, func(ep *model.IstioEndpoint) bool {
+		return b.filterIstioEndpointForLocalCluster(ep, addrsMap)
+	})
+	svcEps = slices.Map(svcEps, func(ep *model.IstioEndpoint) *model.IstioEndpoint {
+		return copyIstioEndpointForLocalCluster(ep)
+	})
+	localityLbEndpoints := b.generate(svcEps, false)
+	if len(localityLbEndpoints) == 0 {
+		return buildEmptyClusterLoadAssignment(model.LocalClusterName)
+	}
+	return b.createClusterLoadAssignment(model.LocalClusterName, localityLbEndpoints)
 }

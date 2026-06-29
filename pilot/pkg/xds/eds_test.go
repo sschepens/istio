@@ -1449,7 +1449,7 @@ func testEdsz(t *testing.T, s *xdsfake.FakeDiscoveryServer, proxyID string) {
 }
 
 // TestEdsLocalCluster covers the zone-aware-routing local_cluster EDS path:
-//   - The proxy can subscribe to xds.LocalClusterName and receive a CLA built from
+//   - The proxy can subscribe to model.LocalClusterName and receive a CLA built from
 //     its own service's endpoints, with locality preserved.
 //   - DestinationRule changes for the local service do NOT trigger a recompute of
 //     local_cluster (since the DR is intentionally ignored for it).
@@ -1518,7 +1518,7 @@ func TestEdsLocalCluster(t *testing.T) {
 		})
 	resp := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
 		TypeUrl:       v3.EndpointType,
-		ResourceNames: []string{xds.LocalClusterName},
+		ResourceNames: []string{model.LocalClusterName},
 	})
 
 	t.Run("initial response includes both localities", func(t *testing.T) {
@@ -1529,8 +1529,8 @@ func TestEdsLocalCluster(t *testing.T) {
 		if err := resp.Resources[0].UnmarshalTo(cla); err != nil {
 			t.Fatal(err)
 		}
-		if cla.ClusterName != xds.LocalClusterName {
-			t.Errorf("cluster name = %q, want %q", cla.ClusterName, xds.LocalClusterName)
+		if cla.ClusterName != model.LocalClusterName {
+			t.Errorf("cluster name = %q, want %q", cla.ClusterName, model.LocalClusterName)
 		}
 		got := map[string]string{}
 		for _, lle := range cla.Endpoints {
@@ -1721,10 +1721,11 @@ func TestEdsLocalClusterHashFilter(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		proxyLabels map[string]string
-		endpoints   []*model.IstioEndpoint
-		wantAddrs   map[string]bool
+		name           string
+		proxyLabels    map[string]string
+		groupingLabels string
+		endpoints      []*model.IstioEndpoint
+		wantAddrs      map[string]bool
 	}{
 		{
 			name:        "pod-template-hash: matching endpoint included",
@@ -1764,8 +1765,9 @@ func TestEdsLocalClusterHashFilter(t *testing.T) {
 			wantAddrs: map[string]bool{proxyIP: true, otherIP: true},
 		},
 		{
-			name:        "rollouts-pod-template-hash: matching endpoint included, mismatched excluded",
-			proxyLabels: withHash(topoLabels, map[string]string{"rollouts-pod-template-hash": proxyHash}),
+			name:           "rollouts-pod-template-hash: matching endpoint included, mismatched excluded",
+			proxyLabels:    withHash(topoLabels, map[string]string{"rollouts-pod-template-hash": proxyHash}),
+			groupingLabels: "rollouts-pod-template-hash",
 			endpoints: []*model.IstioEndpoint{
 				mkEp(proxyIP, map[string]string{"rollouts-pod-template-hash": proxyHash}),
 				mkEp(otherIP, map[string]string{"rollouts-pod-template-hash": otherHash}),
@@ -1773,8 +1775,9 @@ func TestEdsLocalClusterHashFilter(t *testing.T) {
 			wantAddrs: map[string]bool{proxyIP: true},
 		},
 		{
-			name:        "rollouts-pod-template-hash: endpoint without label excluded when proxy has hash",
-			proxyLabels: withHash(topoLabels, map[string]string{"rollouts-pod-template-hash": proxyHash}),
+			name:           "rollouts-pod-template-hash: endpoint without label excluded when proxy has hash",
+			proxyLabels:    withHash(topoLabels, map[string]string{"rollouts-pod-template-hash": proxyHash}),
+			groupingLabels: "rollouts-pod-template-hash",
 			endpoints: []*model.IstioEndpoint{
 				mkEp(proxyIP, map[string]string{"rollouts-pod-template-hash": proxyHash}),
 				mkEp(otherIP, nil),
@@ -1809,12 +1812,13 @@ func TestEdsLocalClusterHashFilter(t *testing.T) {
 				WithID(nodeID).
 				WithType(v3.EndpointType).
 				WithMetadata(model.NodeMetadata{
-					Namespace: svcNS,
-					Labels:    tc.proxyLabels,
+					Namespace:                       svcNS,
+					Labels:                          tc.proxyLabels,
+					SelfDiscoveryGroupingLabelNames: tc.groupingLabels,
 				})
 			resp := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
 				TypeUrl:       v3.EndpointType,
-				ResourceNames: []string{xds.LocalClusterName},
+				ResourceNames: []string{model.LocalClusterName},
 			})
 
 			if len(resp.Resources) != 1 {
@@ -1851,7 +1855,7 @@ func TestEdsLocalClusterNoService(t *testing.T) {
 		WithType(v3.EndpointType)
 	resp := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
 		TypeUrl:       v3.EndpointType,
-		ResourceNames: []string{xds.LocalClusterName},
+		ResourceNames: []string{model.LocalClusterName},
 	})
 
 	if len(resp.Resources) != 1 {
@@ -1861,8 +1865,8 @@ func TestEdsLocalClusterNoService(t *testing.T) {
 	if err := resp.Resources[0].UnmarshalTo(cla); err != nil {
 		t.Fatal(err)
 	}
-	if cla.ClusterName != xds.LocalClusterName {
-		t.Errorf("cluster name = %q, want %q", cla.ClusterName, xds.LocalClusterName)
+	if cla.ClusterName != model.LocalClusterName {
+		t.Errorf("cluster name = %q, want %q", cla.ClusterName, model.LocalClusterName)
 	}
 	if len(cla.Endpoints) != 0 {
 		t.Errorf("expected empty endpoints, got %d locality groups", len(cla.Endpoints))
@@ -1872,8 +1876,8 @@ func TestEdsLocalClusterNoService(t *testing.T) {
 // TestEdsLocalClusterSteadyStateNoService verifies that for a proxy that never has
 // a local service, subsequent unrelated service updates do NOT trigger a new
 // local_cluster push. The initial empty CLA is delivered once, and after that the
-// PrevLocalService==LocalService==\"\" sync inside buildEndpoints should keep the
-// transition flag clear so the partial-push optimization kicks in.
+// equality test inside SetServiceTargets keeps LocalServiceTargetsChanged as false,
+// so the partial-push optimization kicks in.
 func TestEdsLocalClusterSteadyStateNoService(t *testing.T) {
 	s := xdsfake.NewFakeDiscoveryServer(t, xdsfake.FakeOptions{})
 	s.EnsureSynced(t)
@@ -1885,7 +1889,7 @@ func TestEdsLocalClusterSteadyStateNoService(t *testing.T) {
 	// Consume the initial empty-CLA response so the connection is in steady state.
 	_ = ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
 		TypeUrl:       v3.EndpointType,
-		ResourceNames: []string{xds.LocalClusterName},
+		ResourceNames: []string{model.LocalClusterName},
 	})
 
 	// An unrelated ServiceEntry update in the proxy's namespace must not produce
@@ -1901,8 +1905,8 @@ func TestEdsLocalClusterSteadyStateNoService(t *testing.T) {
 }
 
 // TestEdsLocalClusterServiceReplacement verifies that when the proxy's local service
-// is swapped for a service with a different hostname, the transition is detected
-// (LocalService != PrevLocalService) and local_cluster is recomputed from the new
+// is swapped for a service with a different hostname, the membership change is detected
+// (LocalServiceTargetsChanged) and local_cluster is recomputed from the new
 // service's endpoints — even on a partial push.
 func TestEdsLocalClusterServiceReplacement(t *testing.T) {
 	const (
@@ -1962,7 +1966,7 @@ func TestEdsLocalClusterServiceReplacement(t *testing.T) {
 	// Initial state: proxy belongs to svcA. The initial CLA should carry zoneA.
 	initial := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
 		TypeUrl:       v3.EndpointType,
-		ResourceNames: []string{xds.LocalClusterName},
+		ResourceNames: []string{model.LocalClusterName},
 	})
 	{
 		cla := &endpoint.ClusterLoadAssignment{}
@@ -1979,8 +1983,8 @@ func TestEdsLocalClusterServiceReplacement(t *testing.T) {
 	}
 
 	// Swap: remove svcA and add svcB (different hostname) where the proxy's IP is
-	// also an endpoint. After SetServiceTargets, proxy.LocalService becomes hostB
-	// while PrevLocalService is still hostA, so the transition forces a recompute.
+	// also an endpoint. After SetServiceTargets, the selecting-service set changed
+	// (svcA gone, svcB added), so LocalServiceTargetsChanged forces a recompute.
 	s.MemRegistry.RemoveService(host.Name(hostA))
 	svcB := mkSvc(hostB, "b")
 	s.MemRegistry.AddService(svcB)
@@ -2039,7 +2043,7 @@ func TestEdsLocalClusterServiceLifecycle(t *testing.T) {
 		WithTimeout(200 * time.Millisecond)
 	initial := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
 		TypeUrl:       v3.EndpointType,
-		ResourceNames: []string{xds.LocalClusterName},
+		ResourceNames: []string{model.LocalClusterName},
 	})
 
 	extractAddrs := func(t *testing.T, resp *discovery.DiscoveryResponse) map[string]bool {
@@ -2051,8 +2055,8 @@ func TestEdsLocalClusterServiceLifecycle(t *testing.T) {
 		if err := resp.Resources[0].UnmarshalTo(cla); err != nil {
 			t.Fatal(err)
 		}
-		if cla.ClusterName != xds.LocalClusterName {
-			t.Errorf("cluster name = %q, want %q", cla.ClusterName, xds.LocalClusterName)
+		if cla.ClusterName != model.LocalClusterName {
+			t.Errorf("cluster name = %q, want %q", cla.ClusterName, model.LocalClusterName)
 		}
 		got := map[string]bool{}
 		for _, lle := range cla.Endpoints {
@@ -2132,6 +2136,103 @@ func TestEdsLocalClusterServiceLifecycle(t *testing.T) {
 		s.MemRegistry.RemoveService(host.Name(svcHost))
 		waitForCLAState(t)
 	})
+}
+
+// TestEdsLocalClusterUnionMultipleServices verifies that  when a pod is selected by multiple
+// services, local_cluster is built from the union of all selecting services (not just the first /
+// earliest-created one), shared pods are deduped by address, and the configurable grouping labels
+// (pod-template-hash) still narrows the endpoints to the proxy's own ReplicaSet.
+func TestEdsLocalClusterUnionMultipleServices(t *testing.T) {
+	const (
+		proxyIP   = "1.1.1.1"
+		siblingIP = "2.2.2.2" // only in svcA, same ReplicaSet as proxy
+		extraIP   = "3.3.3.3" // only in svcB, same ReplicaSet as proxy
+		canaryIP  = "4.4.4.4" // different ReplicaSet (canary), must be excluded
+		svcNS     = "default"
+		hostA     = "a.default.svc.cluster.local"
+		hostB     = "b.default.svc.cluster.local"
+		nodeID    = "sidecar~1.1.1.1~test.default~default.svc.cluster.local"
+		portName  = "http"
+		portNum   = 80
+		proxyHash = "abc123"
+		otherHash = "xyz789"
+	)
+
+	mkSvc := func(hostname, name string) *model.Service {
+		return &model.Service{
+			Hostname:   host.Name(hostname),
+			Ports:      model.PortList{{Name: portName, Port: portNum, Protocol: protocol.HTTP}},
+			Attributes: model.ServiceAttributes{Namespace: svcNS, Name: name},
+		}
+	}
+	mkInst := func(svc *model.Service, ip, hash string) *model.ServiceInstance {
+		return &model.ServiceInstance{
+			Service:     svc,
+			ServicePort: svc.Ports[0],
+			Endpoint: &model.IstioEndpoint{
+				Addresses:       []string{ip},
+				ServicePortName: portName,
+				EndpointPort:    portNum,
+				Locality:        model.Locality{Label: "region1/zone1/subzone1"},
+				TLSMode:         model.IstioMutualTLSModeLabel,
+				HealthStatus:    model.Healthy,
+				Labels:          map[string]string{"pod-template-hash": hash},
+			},
+		}
+	}
+
+	svcA := mkSvc(hostA, "a")
+	svcB := mkSvc(hostB, "b")
+	s := xdsfake.NewFakeDiscoveryServer(t, xdsfake.FakeOptions{})
+	s.MemRegistry.AddService(svcA)
+	s.MemRegistry.AddService(svcB)
+	// Both services select the proxy pod (proxyIP); svcA adds siblingIP, svcB adds extraIP,
+	// and a canary pod (canaryIP, different hash) is added to svcB to confirm grouping narrowing.
+	s.MemRegistry.AddInstance(mkInst(svcA, proxyIP, proxyHash))
+	s.MemRegistry.AddInstance(mkInst(svcA, siblingIP, proxyHash))
+	s.MemRegistry.AddInstance(mkInst(svcB, proxyIP, proxyHash))
+	s.MemRegistry.AddInstance(mkInst(svcB, extraIP, proxyHash))
+	s.MemRegistry.AddInstance(mkInst(svcB, canaryIP, otherHash))
+	s.EnsureSynced(t)
+
+	ads := s.ConnectADS().
+		WithID(nodeID).
+		WithType(v3.EndpointType).
+		WithMetadata(model.NodeMetadata{
+			Namespace: svcNS,
+			Labels: map[string]string{
+				"topology.kubernetes.io/region": "region1",
+				"topology.kubernetes.io/zone":   "zone1",
+				"pod-template-hash":             proxyHash,
+			},
+		})
+	resp := ads.RequestResponseAck(t, &discovery.DiscoveryRequest{
+		TypeUrl:       v3.EndpointType,
+		ResourceNames: []string{model.LocalClusterName},
+	})
+	if len(resp.Resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(resp.Resources))
+	}
+	cla := &endpoint.ClusterLoadAssignment{}
+	if err := resp.Resources[0].UnmarshalTo(cla); err != nil {
+		t.Fatal(err)
+	}
+	if cla.ClusterName != model.LocalClusterName {
+		t.Errorf("cluster name = %q, want %q", cla.ClusterName, model.LocalClusterName)
+	}
+	got := map[string]bool{}
+	for _, lle := range cla.Endpoints {
+		for _, lbe := range lle.LbEndpoints {
+			got[lbe.GetEndpoint().GetAddress().GetSocketAddress().GetAddress()] = true
+		}
+	}
+	// proxyIP appears in both svcA and svcB but must be deduped to one endpoint; siblingIP (svcA)
+	// and extraIP (svcB) prove the union spans both services; the canary canaryIP (different
+	// pod-template-hash) is excluded by grouping.
+	want := map[string]bool{proxyIP: true, siblingIP: true, extraIP: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("local_cluster endpoints = %v, want %v (union+dedupe+grouping)", got, want)
+	}
 }
 
 // TestEdsZoneAwareDestinationRule verifies the end-to-end EDS flow for a service that

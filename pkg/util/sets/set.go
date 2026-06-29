@@ -177,6 +177,19 @@ func (s Set[T]) IntersectInPlace(s2 Set[T]) Set[T] {
 	return s
 }
 
+// Equal returns true if s and s2 contain the same elements.
+func (s Set[T]) Equal(s2 Set[T]) bool {
+	if len(s) != len(s2) {
+		return false
+	}
+	for key := range s {
+		if !s2.Contains(key) {
+			return false
+		}
+	}
+	return true
+}
+
 // SupersetOf returns true if s contains all elements of s2
 // For example:
 // s = {a1, a2, a3}

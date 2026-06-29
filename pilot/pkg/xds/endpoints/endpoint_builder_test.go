@@ -683,3 +683,218 @@ func TestBuildClusterLoadAssignment_InferenceServicePortFiltering(t *testing.T) 
 		})
 	}
 }
+
+// TestServicesForLocalCluster verifies that the local cluster service set is deduplicated across
+// service-ports by hostname and sorted by hostname.
+func TestServicesForLocalCluster(t *testing.T) {
+	mkSvc := func(hostname string) *model.Service {
+		return &model.Service{Hostname: host.Name(hostname)}
+	}
+	svcB := mkSvc("b.example.com")
+	svcA := mkSvc("a.example.com")
+
+	// Two ports on svcB -> one entry per port, both pointing at the same Service.
+	port80 := &model.Port{Name: "http", Port: 80, Protocol: protocol.HTTP}
+	port443 := &model.Port{Name: "https", Port: 443, Protocol: protocol.HTTP}
+	instPort := func(p *model.Port) model.ServiceInstancePort {
+		return model.ServiceInstancePort{ServicePort: p, TargetPort: uint32(p.Port)}
+	}
+
+	proxy := &model.Proxy{
+		ServiceTargets: []model.ServiceTarget{
+			{Service: svcB, Port: instPort(port80)},
+			{Service: svcB, Port: instPort(port443)}, // duplicate of svcB, different port
+			{Service: svcA, Port: instPort(port80)},
+			{Service: nil, Port: instPort(port80)}, // ignored
+		},
+	}
+
+	got := ServicesForLocalCluster(proxy)
+	// Sorted by hostname: a.example.com, b.example.com
+	want := []*model.Service{svcA, svcB}
+	if len(got) != len(want) {
+		t.Fatalf("got %d services %v, want %d", len(got), hostnamesOf(got), len(want))
+	}
+	for i, svc := range want {
+		if got[i].Hostname != svc.Hostname {
+			t.Errorf("[%d] got %s, want %s", i, got[i].Hostname, svc.Hostname)
+		}
+	}
+}
+
+func hostnamesOf(svcs []*model.Service) []string {
+	out := make([]string, 0, len(svcs))
+	for _, s := range svcs {
+		out = append(out, string(s.Hostname)+"/"+s.Attributes.Namespace)
+	}
+	return out
+}
+
+// TestGroupingKeyForLocalCluster verifies the grouping key construction.
+func TestGroupingKeyForLocalCluster(t *testing.T) {
+	tests := []struct {
+		name    string
+		names   []string
+		labels  map[string]string
+		wantKey string
+	}{
+		{
+			name:    "default pod-template-hash",
+			names:   []string{"pod-template-hash"},
+			labels:  map[string]string{"pod-template-hash": "abc"},
+			wantKey: "pod-template-hash:abc",
+		},
+		{
+			name:    "missing label yields empty value",
+			names:   []string{"pod-template-hash"},
+			labels:  map[string]string{},
+			wantKey: "pod-template-hash:",
+		},
+		{
+			name:    "multiple labels joined in order",
+			names:   []string{"app.kubernetes.io/instance", "app.kubernetes.io/version"},
+			labels:  map[string]string{"app.kubernetes.io/instance": "x", "app.kubernetes.io/version": "1"},
+			wantKey: "app.kubernetes.io/instance:x,app.kubernetes.io/version:1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := groupingKeyForLocalCluster(tt.names, tt.labels); got != tt.wantKey {
+				t.Errorf("got %q, want %q", got, tt.wantKey)
+			}
+		})
+	}
+}
+
+// TestFilterIstioEndpointForLocalCluster verifies grouping-key matching and address dedupe
+func TestFilterIstioEndpointForLocalCluster(t *testing.T) {
+	proxyByHash := &model.Proxy{
+		Type:      model.SidecarProxy,
+		DNSDomain: "ns.svc.cluster.local",
+		Metadata: &model.NodeMetadata{
+			Namespace:           "ns",
+			NodeName:            "node",
+			WorkloadName:        "example",
+			EnableSelfDiscovery: true,
+		},
+		Labels: map[string]string{"pod-template-hash": "abcdefgh"},
+	}
+
+	proxyByInstanceByVersion := &model.Proxy{
+		Type:      model.SidecarProxy,
+		DNSDomain: "ns.svc.cluster.local",
+		Metadata: &model.NodeMetadata{
+			Namespace:                       "ns",
+			NodeName:                        "node",
+			WorkloadName:                    "example",
+			SelfDiscoveryGroupingLabelNames: "app.kubernetes.io/instance,app.kubernetes.io/version",
+		},
+		Labels: map[string]string{
+			"app.kubernetes.io/instance": "example-primary",
+			"app.kubernetes.io/version":  "0.1",
+			"pod-template-hash":          "abcdefgh",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		proxy    *model.Proxy
+		ep       *model.IstioEndpoint
+		addrsMap map[string]struct{}
+		expected bool
+	}{
+		{
+			name:  "by hash, same grouping key, empty map",
+			proxy: proxyByHash,
+			ep: &model.IstioEndpoint{
+				Addresses: []string{"1.1.1.1", "2001:1::1"},
+				Labels:    map[string]string{"pod-template-hash": "abcdefgh"},
+			},
+			addrsMap: map[string]struct{}{},
+			expected: true,
+		},
+		{
+			name:  "by hash, same grouping key, duplicate address",
+			proxy: proxyByHash,
+			ep: &model.IstioEndpoint{
+				Addresses: []string{"1.1.1.1", "2001:1::1"},
+				Labels:    map[string]string{"pod-template-hash": "abcdefgh"},
+			},
+			addrsMap: map[string]struct{}{"1.1.1.1": {}},
+			expected: false,
+		},
+		{
+			name:  "by hash, different grouping key (canary ReplicaSet), excluded",
+			proxy: proxyByHash,
+			ep: &model.IstioEndpoint{
+				Addresses: []string{"1.1.1.1", "2001:1::1"},
+				Labels:    map[string]string{"pod-template-hash": "zyxwvuts"},
+			},
+			addrsMap: map[string]struct{}{},
+			expected: false,
+		},
+		{
+			name:  "by instance by version, same grouping key",
+			proxy: proxyByInstanceByVersion,
+			ep: &model.IstioEndpoint{
+				Addresses: []string{"1.1.1.1", "2001:1::1"},
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "example-primary",
+					"app.kubernetes.io/version":  "0.1",
+				},
+			},
+			addrsMap: map[string]struct{}{},
+			expected: true,
+		},
+		{
+			name:  "by instance by version, different instance (canary), excluded",
+			proxy: proxyByInstanceByVersion,
+			ep: &model.IstioEndpoint{
+				Addresses: []string{"1.1.1.1", "2001:1::1"},
+				Labels: map[string]string{
+					"app.kubernetes.io/instance": "example-canary",
+					"app.kubernetes.io/version":  "0.1",
+				},
+			},
+			addrsMap: map[string]struct{}{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// filterIstioEndpointForLocalCluster only depends on the grouping key (subsetName) and the
+			// configured label list, so exercise it via a minimal builder without the heavy push/sidecar setup.
+			labels := groupingLabelNamesForLocalCluster(tt.proxy)
+			builder := &EndpointBuilder{
+				subsetName:                     groupingKeyForLocalCluster(labels, tt.proxy.Labels),
+				localClusterGroupingLabelNames: labels,
+			}
+			got := builder.filterIstioEndpointForLocalCluster(tt.ep, tt.addrsMap)
+			if got != tt.expected {
+				t.Fatalf("expected %v but got %v", tt.expected, got)
+			}
+		})
+	}
+}
+
+// TestCopyIstioEndpointForLocalCluster verifies the dummy-port rewrite and that the original
+// endpoint is not mutated.
+func TestCopyIstioEndpointForLocalCluster(t *testing.T) {
+	ep := &model.IstioEndpoint{
+		Addresses:       []string{"1.1.1.1"},
+		ServicePortName: "http",
+		EndpointPort:    80,
+	}
+	got := copyIstioEndpointForLocalCluster(ep)
+	if got.ServicePortName != localClusterPortName {
+		t.Errorf("ServicePortName = %q, want %q", got.ServicePortName, localClusterPortName)
+	}
+	if got.EndpointPort != LocalClusterPortNumber {
+		t.Errorf("EndpointPort = %d, want %d", got.EndpointPort, LocalClusterPortNumber)
+	}
+	// original must be untouched
+	if ep.ServicePortName != "http" || ep.EndpointPort != 80 {
+		t.Errorf("original endpoint was mutated: %v", ep)
+	}
+}

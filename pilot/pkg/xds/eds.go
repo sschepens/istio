@@ -30,8 +30,6 @@ import (
 	"istio.io/istio/pkg/util/sets"
 )
 
-const LocalClusterName = "local_cluster"
-
 // SvcUpdate is a callback from service discovery when service info changes.
 func (s *DiscoveryServer) SvcUpdate(shard model.ShardKey, hostname string, namespace string, event model.Event) {
 	// When a service deleted, we should cleanup the endpoint shards and also remove keys from EndpointIndex to
@@ -216,34 +214,41 @@ func (eds *EdsGenerator) buildEndpoints(proxy *model.Proxy,
 			continue
 		}
 
-		dir, subsetName, hostname, port := parseClusterName(clusterName, proxy)
-		svc := req.Push.ServiceForHostname(proxy, hostname)
+		var builder endpoints.EndpointBuilder
+		var dir model.TrafficDirection
+		var subsetName string
+		var hostname host.Name
+		var port int
+		var svc *model.Service
 
-		isLocalCluster := clusterName == LocalClusterName
+		isLocalCluster := clusterName == model.LocalClusterName
+		if isLocalCluster {
+			dir = model.TrafficDirectionOutbound
+			port = endpoints.LocalClusterPortNumber
+		} else {
+			dir, subsetName, hostname, port = model.ParseSubsetKey(clusterName)
+			svc = req.Push.ServiceForHostname(proxy, hostname)
+		}
+
 		var dr *model.ConsolidatedDestRule
-		if svc != nil && !isLocalCluster {
-			// TODO: disable DR lookup for local_cluster, as it's only used for zone-aware routing math,
-			// and we want to return the full locality distribution of the proxy's own service.
-			// We may want to enable this in the future, mainly to correctly create priorities when using failovers,
-			// which might improve traffic calculations if using sub-region failovers.
+		if svc != nil {
 			dr = proxy.SidecarScope.DestinationRule(model.TrafficDirectionOutbound, proxy, svc.Hostname)
 		}
 
 		// if we can do a partial push, check if the cluster is affected by the changed destination rules or peer authentication policies
 		// to avoid recomputing the cluster if it is not affected
 		if partialPush && svc != nil && !affected {
-			// local cluster is unaffected by authn or DR changes
-			if isLocalCluster {
-				continue
-			}
-
 			if !clusterAffectedByChangedAuthn(svc, changedAuthnNs, req.Push.Mesh.RootNamespace) &&
 				!clusterAffectedByChangedDrs(proxy, dr, hostname, changedDrs) {
 				continue
 			}
 		}
 
-		builder := *endpoints.NewCDSEndpointBuilder(proxy, req.Push, clusterName, dir, subsetName, hostname, port, svc, dr)
+		if isLocalCluster {
+			builder = endpoints.NewEndpointBuilderForLocalCluster(proxy, req.Push)
+		} else {
+			builder = *endpoints.NewCDSEndpointBuilder(proxy, req.Push, clusterName, dir, subsetName, hostname, port, svc, dr)
+		}
 
 		// We skip cache if assertions are enabled, so that the cache will assert our eviction logic is correct
 		if !features.EnableUnsafeAssertions {
@@ -274,29 +279,19 @@ func (eds *EdsGenerator) buildEndpoints(proxy *model.Proxy,
 	}
 }
 
-func parseClusterName(clusterName string, proxy *model.Proxy) (model.TrafficDirection, string, host.Name, int) {
-	if clusterName == LocalClusterName {
-		if proxy.LocalService == "" {
-			return model.TrafficDirectionOutbound, "", "", 0
-		}
-		return model.TrafficDirectionOutbound, "", proxy.LocalService, proxy.ServiceTargets[0].Port.Port
-	}
-
-	return model.ParseSubsetKey(clusterName)
-}
-
 func affectedService(proxy *model.Proxy, edsUpdatedServices sets.Set[string], clusterName string) bool {
-	if clusterName == LocalClusterName {
-		// Detect a local-service transition (add, delete, or replace). Both fields are
-		// empty for proxies that never had a local service, so steady-state pushes for
-		// those proxies fall through to "no service, nothing to push".
-		if proxy.LocalService != proxy.PrevLocalService {
+	if clusterName == model.LocalClusterName {
+		if proxy.LocalServiceTargetsChanged {
+			proxy.LocalServiceTargetsChanged = false
 			return true
 		}
-		if proxy.LocalService == "" {
-			return false
+		// Endpoint/content change of any currently-selecting service.
+		for _, hn := range endpoints.HostnamesForLocalCluster(proxy) {
+			if edsUpdatedServices.Contains(hn) {
+				return true
+			}
 		}
-		return edsUpdatedServices.Contains(string(proxy.LocalService))
+		return false
 	}
 	return edsUpdatedServices.Contains(model.ParseSubsetKeyHostname(clusterName))
 }

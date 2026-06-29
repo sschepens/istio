@@ -303,6 +303,10 @@ const (
 
 	// dnsCacheConfigNameSuffix is the suffix used for DNS cache config names
 	dnsCacheConfigNameSuffix = "_dfp_dns_cache"
+
+	// LocalClusterName is the name of the Envoy static cluster that carries the proxy's own source
+	// topology (self-discovery), consumed by Envoy's zone-aware load balancing.
+	LocalClusterName = "local_cluster"
 )
 
 // ServiceInstance represents an individual instance of a specific version

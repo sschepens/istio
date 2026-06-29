@@ -288,6 +288,13 @@ type NodeMetadata struct {
 	// in its bootstrap for zone-aware load balancing. Set via ISTIO_META_ENABLE_SELF_DISCOVERY.
 	EnableSelfDiscovery StringBool `json:"ENABLE_SELF_DISCOVERY,omitempty"`
 
+	// SelfDiscoveryGroupingLabelNames is a comma-separated list of pod label keys used to group the
+	// instances that belong to the proxy's own source cluster (local_cluster) for zone-aware load
+	// balancing. If unset, `pod-template-hash` is used by default. Set via
+	// ISTIO_META_SELF_DISCOVERY_GROUPING_LABEL_NAMES (meshConfig.defaultConfig.proxyMetadata or the
+	// proxy.istio.io/config annotation).
+	SelfDiscoveryGroupingLabelNames string `json:"SELF_DISCOVERY_GROUPING_LABEL_NAMES,omitempty"`
+
 	// DNSCapture indicates whether the workload has enabled dns capture
 	DNSCapture StringBool `json:"DNS_CAPTURE,omitempty"`
 
