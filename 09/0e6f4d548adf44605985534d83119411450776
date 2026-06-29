@@ -1,0 +1,24 @@
+pilot/pkg/model/virtualservice.go
+  s_da3de4ee578979::t_4575684b2ab2c4 36
+pilot/pkg/model/push_context.go
+  s_da3de4ee578979::t_6b366b3d3a2d82 102
+  s_da3de4ee578979::t_5b09eba1dcc91d 1754,1757
+  s_da3de4ee578979::t_eec84b470b02d8 1779-1786
+  s_da3de4ee578979::t_ef4d41419fcad9 1086
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "090e6f4d548adf44605985534d83119411450776",
+  "prompts": {},
+  "sessions": {
+    "s_da3de4ee578979": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8dd7adb6-aa70-4cd6-8cad-ef71e8aff059",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
