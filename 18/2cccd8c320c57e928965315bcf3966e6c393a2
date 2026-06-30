@@ -1,0 +1,34 @@
+pilot/pkg/xds/proxy_dependencies_test.go
+  s_6a0e3a545ab482::t_7229bc7eebd2b4 501-508,524-526,530,538,548-552,554,556-560,562,564-568,570,572-576,578,580-598,600,602-606,608,610-614,617-618,630
+  s_6a0e3a545ab482::t_6612da2ea4ae6a 21-22
+  s_6a0e3a545ab482::t_ec1b242950af9b 509-523,527-529,531-537,539-547,553,555,561,563,569,571,577,579,599,601,607,609,615-616,619-629,631-640
+pilot/pkg/model/context.go
+  s_6a0e3a545ab482::t_6b7a77148ca7e7 368-371,375
+  s_6a0e3a545ab482::t_d2ec8c65e38374 621,623-626
+pilot/pkg/xds/eds.go
+  s_6a0e3a545ab482::t_2dfbf6b94e0c66 279,296,299
+  s_6a0e3a545ab482::t_2536ab70c38a3c 282
+pilot/pkg/xds/proxy_dependencies.go
+  s_6a0e3a545ab482::t_c85a5c5e280341 46,56-58
+  s_6a0e3a545ab482::t_cda564b14a9565 53
+  s_6a0e3a545ab482::t_52800514db1181 50-52
+  s_6a0e3a545ab482::t_e13114ff35879f 54-55
+  s_6a0e3a545ab482::t_3f5d9359881b25 59
+  s_6a0e3a545ab482::t_e9f8051e3bb37a 48-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "182cccd8c320c57e928965315bcf3966e6c393a2",
+  "prompts": {},
+  "sessions": {
+    "s_6a0e3a545ab482": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9eda0de-9d05-4fb5-9cf4-b03820cc0022",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
