@@ -1,0 +1,24 @@
+pilot/pkg/networking/core/loadbalancer/loadbalancer_test.go
+  s_d8bff46cdb34a2::t_ddf64e78ad1ba4 1145
+  s_d8bff46cdb34a2::t_308c0ff35ac4f0 1112
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_d8bff46cdb34a2::t_c7ca38749011a5 240
+pkg/config/validation/agent/validation.go
+  s_d8bff46cdb34a2::t_f2b6a9e9ce9052 611-620
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "a023119a585c0b3927c2274666eddd2b9231d5c1",
+  "prompts": {},
+  "sessions": {
+    "s_d8bff46cdb34a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "43b638f5-259e-47b4-949b-1a5717f8c23b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
