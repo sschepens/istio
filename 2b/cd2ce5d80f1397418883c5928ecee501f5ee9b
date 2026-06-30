@@ -1,0 +1,21 @@
+pilot/pkg/xds/endpoints/endpoint_builder.go
+  s_fe172cc4ac8039::t_1f23beff72a915 301-304,306,308-311
+  s_fe172cc4ac8039::t_adf54d5ac8d48c 305
+  s_fe172cc4ac8039::t_63bcec3b930fb3 307
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "2bcd2ce5d80f1397418883c5928ecee501f5ee9b",
+  "prompts": {},
+  "sessions": {
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
