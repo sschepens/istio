@@ -1,0 +1,19 @@
+pilot/pkg/networking/core/loadbalancer/loadbalancer.go
+  s_82d493627ab2df::t_0929dd4511c1c1 64-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "ffaaf3013737ad4891ccadf175fdb58c02a76def",
+  "prompts": {},
+  "sessions": {
+    "s_82d493627ab2df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d57284-0cb8-44d4-b406-dd38d8d88d37",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}

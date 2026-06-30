@@ -1,0 +1,23 @@
+pilot/pkg/networking/core/cluster_traffic_policy.go
+  s_d8bff46cdb34a2::t_626dde35b58c2b 301-304
+pilot/pkg/networking/core/cluster_test.go
+  s_d8bff46cdb34a2::t_765dff16b869a3 2599
+pilot/pkg/xds/endpoints/endpoint_builder.go
+  s_d8bff46cdb34a2::t_1e1df509de33d8 451-455,465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "28586b4021b305fe2cb54011edf79eb0252e9338",
+  "prompts": {},
+  "sessions": {
+    "s_d8bff46cdb34a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "43b638f5-259e-47b4-949b-1a5717f8c23b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}

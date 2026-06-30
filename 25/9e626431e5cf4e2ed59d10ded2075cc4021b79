@@ -1,0 +1,25 @@
+pilot/pkg/xds/eds.go
+  s_6a0e3a545ab482::t_abdf8bf039d0d7 25
+  s_6a0e3a545ab482::t_35cf4d5acd30f5 277,288
+pilot/pkg/xds/eds_test.go
+  s_6a0e3a545ab482::t_e4f5a72c5d95d9 1452,1521,1532-1533,1817,1854,1864-1865,1888,1965,2042,2054-2055
+pilot/pkg/networking/util/util.go
+  s_6a0e3a545ab482::t_f6b1d8053d52ba 84,89
+  s_6a0e3a545ab482::t_699ada59f546c3 85-88,90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "259e626431e5cf4e2ed59d10ded2075cc4021b79",
+  "prompts": {},
+  "sessions": {
+    "s_6a0e3a545ab482": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9eda0de-9d05-4fb5-9cf4-b03820cc0022",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}

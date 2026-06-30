@@ -1,0 +1,20 @@
+pilot/pkg/xds/eds_test.go
+  s_82d493627ab2df::t_dcde506c6190bd 1674-1755,1758-1760,1763-1839
+  s_82d493627ab2df::t_c4b0ad504cfb92 1756-1757,1761-1762
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "7721fc7be3c71b3c50c1143324acc65e3203db6f",
+  "prompts": {},
+  "sessions": {
+    "s_82d493627ab2df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d57284-0cb8-44d4-b406-dd38d8d88d37",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+pilot/pkg/xds/eds_test.go
+  s_82d493627ab2df::t_4a4da5192711d8 1866-1872
+  s_82d493627ab2df::t_57464d1a802597 1506-1518
+  s_82d493627ab2df::t_32c14a1d74af19 1568
+  s_82d493627ab2df::t_1b4b471522cce3 1499
+  s_82d493627ab2df::t_a9aa007a18b7aa 1788-1794,1821
+  s_82d493627ab2df::t_fa29f9d9f8ff7d 1619
+  s_82d493627ab2df::t_1c94fd1753d332 1640-1671
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_82d493627ab2df::t_79425b0e35e3ad 229-239
+  s_82d493627ab2df::t_329a7e78c1bf9e 228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "eb0a7f25ab8b938939cffd06af42cf90f3fe0c72",
+  "prompts": {},
+  "sessions": {
+    "s_82d493627ab2df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d57284-0cb8-44d4-b406-dd38d8d88d37",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
