@@ -1,0 +1,27 @@
+pkg/config/validation/agent/validation.go
+  s_6a0e3a545ab482::t_b9f83afbf30236 598-602,604,608
+  s_6a0e3a545ab482::t_cbf4e0b0b6945a 587-591
+pkg/config/validation/agent/validation_test.go
+  s_6a0e3a545ab482::t_2792779babe4f4 1512-1516
+  s_6a0e3a545ab482::t_10a21322f9e3f9 1509-1511
+go.mod
+  s_6a0e3a545ab482::t_e184f931c019c2 237
+go.sum
+  s_6a0e3a545ab482::t_2d891cb612c318 434-435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "7000c17a92836c482521d24ff1fc271fc8ec096a",
+  "prompts": {},
+  "sessions": {
+    "s_6a0e3a545ab482": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9eda0de-9d05-4fb5-9cf4-b03820cc0022",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
