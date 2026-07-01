@@ -1,0 +1,25 @@
+pkg/config/mesh/mesh_test.go
+  s_fe172cc4ac8039::t_2f577aa66376e2 280,282-287,296-299,304-307,310,318-319,326-329
+pkg/config/validation/agent/validation.go
+  s_fe172cc4ac8039::t_a99e6afa6f0ee1 873-878
+go.mod
+  s_fe172cc4ac8039::t_e31e47542cba6f 237
+go.sum
+  s_fe172cc4ac8039::t_3fa1f09a1ab7cf 434-435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "395019a931706065524c7a2e8e42f9423a903950",
+  "prompts": {},
+  "sessions": {
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
