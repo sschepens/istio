@@ -1,0 +1,25 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_fe172cc4ac8039::t_f8fbf761623a7f 188
+  s_fe172cc4ac8039::t_e679e09065069c 299-302,311
+  s_fe172cc4ac8039::t_ea6f0eb2e8b36e 221-239
+  s_fe172cc4ac8039::t_193c3426063b90 114
+  s_fe172cc4ac8039::t_a69105a125ba55 61-63
+  s_fe172cc4ac8039::t_9f14bce608d3bc 159
+  s_fe172cc4ac8039::t_2b20c6aab9b4ec 220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "bb6af54b2a4995482d3e5e8047a456bc79084362",
+  "prompts": {},
+  "sessions": {
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
