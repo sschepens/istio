@@ -1,0 +1,19 @@
+pilot/pkg/model/context_test.go
+  s_fe172cc4ac8039::t_ab0367daef2d58 307,314,321,328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "fc2cef904d6dab12c17d1cdd2dce04aa1ef2b435",
+  "prompts": {},
+  "sessions": {
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
