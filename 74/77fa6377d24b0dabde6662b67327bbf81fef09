@@ -1,0 +1,26 @@
+pilot/pkg/xds/proxy_dependencies_test.go
+  s_fe172cc4ac8039::t_405991261fbdbd 536-537
+pilot/pkg/xds/eds.go
+  s_fe172cc4ac8039::t_81a273c6383df7 279
+  s_fe172cc4ac8039::t_2f38962c623ee1 224
+pilot/pkg/model/context.go
+  s_fe172cc4ac8039::t_8c0644883f6cd0 377-380
+  s_fe172cc4ac8039::t_fde83d1b8c928c 306-313
+  s_fe172cc4ac8039::t_6d0cf318a38c2a 376
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "7477fa6377d24b0dabde6662b67327bbf81fef09",
+  "prompts": {},
+  "sessions": {
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
