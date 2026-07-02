@@ -1,0 +1,45 @@
+pilot/pkg/model/config.go
+  s_9b2e615365468c::t_adfcc4338b11ab 18
+  s_9b2e615365468c::t_dada8af8d3b495 319,322-327
+  s_9b2e615365468c::t_606e89c6301922 328-330
+pilot/pkg/model/virtualservice_controller.go
+  s_9b2e615365468c::t_33c3e88269098d 18
+  s_9b2e615365468c::t_58103a5d295ffc 391
+  s_9b2e615365468c::t_e5806c31c26ec1 392
+  s_9e55fedb90e9f4::t_d9d2597be9342c 260-263
+  s_9e55fedb90e9f4::t_fc4bdf9f756ca0 256,265,302,375,377,380-384,390,394
+  s_9b2e615365468c::t_f9e1ca421c2deb 19
+  s_9e55fedb90e9f4::t_99d1b64f28b58f 255
+  s_9e55fedb90e9f4::t_24f57edac0e0bd 257-259
+  s_9e55fedb90e9f4::t_6f6874b1622515 264
+  s_9e55fedb90e9f4::t_84244c32253465 266-267
+  s_9e55fedb90e9f4::t_50128efef74246 303-305
+  s_9e55fedb90e9f4::t_ad70e73f7bb8ed 374
+  s_9e55fedb90e9f4::t_eda45d0abd2f07 376
+  s_9e55fedb90e9f4::t_57f51ffa3d7c0b 385-389
+  s_9e55fedb90e9f4::t_5759179d68a5f4 395-397
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "c1164870f6c993f4991f650fd8cfbdeba012e959",
+  "prompts": {},
+  "sessions": {
+    "s_9b2e615365468c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab74d476-5946-4643-9a50-02eeeeff3dab",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    },
+    "s_9e55fedb90e9f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3af09fd3-b62a-40ef-a3f4-6e02ef79c93a",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
