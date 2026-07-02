@@ -1,0 +1,29 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_fe172cc4ac8039::t_c55ded0ac2a816 162
+  s_fe172cc4ac8039::t_52bc7bcae746ef 284,288-299
+  s_fe172cc4ac8039::t_a718ebc44b850f 111
+  s_fe172cc4ac8039::t_b032fa34c4275d 285-287
+  s_fe172cc4ac8039::t_c9281b4c18b10d 116
+  s_fe172cc4ac8039::t_1b24ed234a830b 351,357-358,362-366
+  s_fe172cc4ac8039::t_6adc4ce2885f60 192
+  s_fe172cc4ac8039::t_ff7275cb322dc4 226-229
+  s_fe172cc4ac8039::t_d80c50476a3e45 225,230-241
+  s_fe172cc4ac8039::t_b311c5cf17bf5e 224
+  s_fe172cc4ac8039::t_c3f3b1c354c652 283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "6bddd200593fa3cec7161c674ee6830fbd27c425",
+  "prompts": {},
+  "sessions": {
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
