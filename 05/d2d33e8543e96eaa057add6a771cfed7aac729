@@ -1,0 +1,223 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_a0170725e0f94c::t_04fca11067ca2d 404-406,419,453-454,458-459,461-462,465,512-513,518-519
+  s_a0170725e0f94c::t_63febfe692b994 24-27,33,46-50,356,359,361,369,403,414-416,418,420-435,438-447,449-452,455,460,520,522-524,586-609
+  s_050b05c4d66d5e::t_36dd3f235caa6d 58
+  s_050b05c4d66d5e::t_04fd8debb002cc 448
+  s_050b05c4d66d5e::t_75253c8ababa5e 436-437
+  s_2e12c4e29e9b3f::t_7a1d6c7db4331b 211-212
+  s_2e12c4e29e9b3f::t_1dafa869799483 360,514
+  s_2e12c4e29e9b3f::t_a1cbbed5ae1a68 268-269,280,282,633-637,639
+  s_2e12c4e29e9b3f::t_deefd973b9e41e 40-44,55-56,134,178-182,184,187-189,193,196-198,204-206,208-210,213-218,220,263-267,270-279,281,313-316,324-325,327,329
+  s_2e12c4e29e9b3f::t_bfc51dee27afdd 335,337
+  s_2e12c4e29e9b3f::t_60948b5eb55150 376-384
+  s_2e12c4e29e9b3f::t_bce2f3596e8f23 76-78,117-129,133,154-156,158-159,175-176,183,343-345,347-348
+  s_82d493627ab2df::t_79425b0e35e3ad 301,303-311
+  s_82d493627ab2df::t_329a7e78c1bf9e 300
+  s_82d493627ab2df::t_e0762c072d7e41 190
+  s_82d493627ab2df::t_66ab5dd933c9bc 321-323,326
+  s_82d493627ab2df::t_4ec2510dff5418 349
+  s_82d493627ab2df::t_d7555a2857e553 105,110
+  s_82d493627ab2df::t_a4cf6feeb69a2f 160
+  s_b751f07f984c09::t_1b8a178bbb7732 28,130-132,157,177,346,385-400
+  s_b751f07f984c09::t_c5243bcae1d24a 401-402
+  s_b751f07f984c09::t_bebb376534308b 407-413,417,456-457,463-464,466-478,481-487,525-564,567,570-584
+  s_b751f07f984c09::t_7309217ca658f6 585
+  s_b751f07f984c09::t_0df0cc7df6a965 565-566,568-569
+  s_b751f07f984c09::t_435f700b5837fc 177,385,400
+  s_d8bff46cdb34a2::t_c7ca38749011a5 302
+  s_fe172cc4ac8039::t_f8fbf761623a7f 191
+  s_fe172cc4ac8039::t_e679e09065069c 338-341,350
+  s_fe172cc4ac8039::t_ea6f0eb2e8b36e 243-261
+  s_fe172cc4ac8039::t_193c3426063b90 115
+  s_fe172cc4ac8039::t_a69105a125ba55 61-63
+  s_fe172cc4ac8039::t_9f14bce608d3bc 161
+  s_fe172cc4ac8039::t_2b20c6aab9b4ec 242
+  s_fe172cc4ac8039::t_ff7275cb322dc4 226-229
+  s_fe172cc4ac8039::t_52bc7bcae746ef 284,288-299
+  s_fe172cc4ac8039::t_b032fa34c4275d 285-287
+  s_fe172cc4ac8039::t_c9281b4c18b10d 116
+  s_fe172cc4ac8039::t_1b24ed234a830b 351,357-358,364-365,368
+  s_fe172cc4ac8039::t_4887df022baa25 362-363,366-367
+  s_fe172cc4ac8039::t_2ec7588183c9e8 491-524
+  s_fe172cc4ac8039::t_d80c50476a3e45 225,230-241
+  s_fe172cc4ac8039::t_c3f3b1c354c652 283
+  s_fe172cc4ac8039::t_a718ebc44b850f 111
+  s_fe172cc4ac8039::t_c55ded0ac2a816 162
+  s_fe172cc4ac8039::t_6adc4ce2885f60 192
+  s_fe172cc4ac8039::t_b311c5cf17bf5e 224
+pilot/cmd/pilot-agent/options/options.go
+  s_050b05c4d66d5e::t_cc1bd3d70e2451 99-104
+pkg/bootstrap/config.go
+  s_050b05c4d66d5e::t_c9023cb64cd063 210
+tests/integration/pilot/zoneawarelb/main_test.go
+  s_050b05c4d66d5e::t_bfe6084459b48e 34-35,40-45
+pkg/bootstrap/config_test.go
+  s_050b05c4d66d5e::t_ed6251ce95aabb 369-370,372-373,377-380,383
+pilot/pkg/networking/core/cluster_traffic_policy.go
+  s_050b05c4d66d5e::t_7640b90900cda8 57-59,61,283,303-304,306,351,354-360
+  s_050b05c4d66d5e::t_b9fbbe635b23d3 284
+  s_050b05c4d66d5e::t_b26c4baeecb2af 56
+  s_050b05c4d66d5e::t_1f1eed818b96cd 352
+  s_d8bff46cdb34a2::t_626dde35b58c2b 302
+pilot/pkg/networking/core/cluster_traffic_policy_test.go
+  s_050b05c4d66d5e::t_c1515f03709cbb 253,269,282,288,290-291
+  s_050b05c4d66d5e::t_2a3dbae29b970e 231,233
+pilot/pkg/xds/eds_test.go
+  s_82d493627ab2df::t_4a4da5192711d8 2032-2038
+  s_82d493627ab2df::t_57464d1a802597 1506-1518
+  s_82d493627ab2df::t_32c14a1d74af19 1568
+  s_82d493627ab2df::t_1b4b471522cce3 1499
+  s_82d493627ab2df::t_a9aa007a18b7aa 1954-1960,1987
+  s_82d493627ab2df::t_fa29f9d9f8ff7d 1619
+  s_82d493627ab2df::t_1c94fd1753d332 1640-1671
+  s_82d493627ab2df::t_dcde506c6190bd 1674-1755,1758-1760,1763-1816,1818-1839
+  s_82d493627ab2df::t_c4b0ad504cfb92 1756-1757,1761-1762
+  s_6a0e3a545ab482::t_e4f5a72c5d95d9 1452,1521,1532-1533,1817,1854,1864-1865,1888,1965,2042,2054-2055
+pilot/pkg/networking/core/loadbalancer/loadbalancer.go
+  s_82d493627ab2df::t_76727946b3d445 53
+  s_82d493627ab2df::t_96676f00cb3a9f 52
+  s_82d493627ab2df::t_0cd982d0471230 54-56
+  s_ca247499fa3d56::t_2b8acf96239f66 124,126-128
+pilot/pkg/networking/core/loadbalancer/loadbalancer_test.go
+  s_82d493627ab2df::t_507df4bde578e7 1118,1125
+  s_82d493627ab2df::t_5de08475131589 1157-1160,1162-1163
+  s_b751f07f984c09::t_f737aaf48c3f39 1131-1132,1161,1173-1177
+  s_b751f07f984c09::t_7689af5743c843 1128-1130
+  s_d8bff46cdb34a2::t_ddf64e78ad1ba4 1145
+  s_d8bff46cdb34a2::t_308c0ff35ac4f0 1112
+pilot/pkg/networking/core/cluster_test.go
+  s_d8bff46cdb34a2::t_765dff16b869a3 2599
+pilot/pkg/xds/endpoints/endpoint_builder.go
+  s_d8bff46cdb34a2::t_1e1df509de33d8 470-474,484
+  s_fe172cc4ac8039::t_1f23beff72a915 301-304,306,308-311
+  s_fe172cc4ac8039::t_adf54d5ac8d48c 305
+  s_fe172cc4ac8039::t_63bcec3b930fb3 307
+pilot/pkg/xds/proxy_dependencies_test.go
+  s_6a0e3a545ab482::t_7229bc7eebd2b4 499-506,522-524,528,546-550,552,554-558,560,562-566,568,570-574,576,578-596,598,600-604,606,608-612,615-616,628
+  s_6a0e3a545ab482::t_ec1b242950af9b 507-521,525-527,529-535,538-545,551,553,559,561,567,569,575,577,597,599,605,607,613-614,617-627,629-638
+  s_fe172cc4ac8039::t_405991261fbdbd 536-537
+pilot/pkg/model/context.go
+  s_6a0e3a545ab482::t_d2ec8c65e38374 633-634,636
+  s_fe172cc4ac8039::t_8c0644883f6cd0 377-380
+  s_fe172cc4ac8039::t_fde83d1b8c928c 306-313
+  s_fe172cc4ac8039::t_6d0cf318a38c2a 376
+pilot/pkg/xds/eds.go
+  s_6a0e3a545ab482::t_2dfbf6b94e0c66 275,293,296
+  s_6a0e3a545ab482::t_abdf8bf039d0d7 25
+  s_6a0e3a545ab482::t_35cf4d5acd30f5 274,286
+  s_fe172cc4ac8039::t_81a273c6383df7 279
+  s_fe172cc4ac8039::t_2f38962c623ee1 224
+pilot/pkg/xds/proxy_dependencies.go
+  s_6a0e3a545ab482::t_c85a5c5e280341 46,56-58
+  s_6a0e3a545ab482::t_cda564b14a9565 53
+  s_6a0e3a545ab482::t_52800514db1181 50-52
+  s_6a0e3a545ab482::t_e13114ff35879f 54-55
+  s_6a0e3a545ab482::t_3f5d9359881b25 59
+  s_6a0e3a545ab482::t_e9f8051e3bb37a 48
+pilot/pkg/networking/util/util.go
+  s_6a0e3a545ab482::t_f6b1d8053d52ba 84,89
+  s_6a0e3a545ab482::t_699ada59f546c3 85-88,90
+pkg/config/validation/agent/validation.go
+  s_6a0e3a545ab482::t_b9f83afbf30236 598-602,604,608
+  s_6a0e3a545ab482::t_cbf4e0b0b6945a 587-591
+  s_fe172cc4ac8039::t_a99e6afa6f0ee1 873-878
+pkg/config/validation/agent/validation_test.go
+  s_6a0e3a545ab482::t_2792779babe4f4 1464-1468
+  s_6a0e3a545ab482::t_10a21322f9e3f9 1461-1463
+pkg/config/mesh/mesh_test.go
+  s_fe172cc4ac8039::t_2f577aa66376e2 280,282-287,296-299,304-307,310,318-319,326-329
+pilot/pkg/model/context_test.go
+  s_fe172cc4ac8039::t_ab0367daef2d58 307,314,321,328
+go.mod
+  s_77f554348dd831::t_b2156911a3deb4 237
+go.sum
+  s_77f554348dd831::t_20540d006ba1eb 434-435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "05d2d33e8543e96eaa057add6a771cfed7aac729",
+  "prompts": {},
+  "sessions": {
+    "s_050b05c4d66d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63fdc442-892f-40fd-be91-56ba002a9ddf",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    },
+    "s_2e12c4e29e9b3f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ef4e9-4c6f-7f93-bc01-91daf60650ec",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    },
+    "s_6a0e3a545ab482": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9eda0de-9d05-4fb5-9cf4-b03820cc0022",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_77f554348dd831": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77e00e98-89af-4f91-b192-f23fc95852ab",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_82d493627ab2df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d57284-0cb8-44d4-b406-dd38d8d88d37",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    },
+    "s_a0170725e0f94c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e84ec35b-7ba1-4059-88c7-d26d45669b4d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_b751f07f984c09": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0477-1898-7283-9b73-ef9477acca37",
+        "model": "gpt-5.5"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_ca247499fa3d56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e197b897-5dca-4a90-b9b5-833f9b7f7d3a",
+        "model": "unknown"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_d8bff46cdb34a2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "43b638f5-259e-47b4-949b-1a5717f8c23b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_fe172cc4ac8039": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b43448a4-d2d5-47cb-9934-65a79fcbf74e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
