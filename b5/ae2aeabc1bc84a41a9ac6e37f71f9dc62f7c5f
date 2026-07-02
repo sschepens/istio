@@ -1,0 +1,21 @@
+go.mod
+  s_77f554348dd831::t_b2156911a3deb4 237
+go.sum
+  s_77f554348dd831::t_20540d006ba1eb 434-435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "b5ae2aeabc1bc84a41a9ac6e37f71f9dc62f7c5f",
+  "prompts": {},
+  "sessions": {
+    "s_77f554348dd831": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77e00e98-89af-4f91-b192-f23fc95852ab",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
