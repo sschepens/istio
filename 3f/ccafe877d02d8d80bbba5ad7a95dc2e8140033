@@ -1,0 +1,19 @@
+releasenotes/notes/dr-subset-tls-mode-fallback.yaml
+  s_d7f77d2f663195::t_6d9cfe73a65dfd 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3fccafe877d02d8d80bbba5ad7a95dc2e8140033",
+  "prompts": {},
+  "sessions": {
+    "s_d7f77d2f663195": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "925ca387-3fcc-46a5-ac8d-af34291477b8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
