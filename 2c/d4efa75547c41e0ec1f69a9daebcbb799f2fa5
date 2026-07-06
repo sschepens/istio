@@ -1,0 +1,19 @@
+pilot/pkg/xds/endpoints/ep_filters_test.go
+  s_d7f77d2f663195::t_d65c62a1c63019 479-532
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "2cd4efa75547c41e0ec1f69a9daebcbb799f2fa5",
+  "prompts": {},
+  "sessions": {
+    "s_d7f77d2f663195": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "925ca387-3fcc-46a5-ac8d-af34291477b8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
