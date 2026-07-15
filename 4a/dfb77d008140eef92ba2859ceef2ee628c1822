@@ -1,0 +1,19 @@
+go.mod
+  s_2ddaf1d0795f96::t_70bd4c4151c466 99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "4adfb77d008140eef92ba2859ceef2ee628c1822",
+  "prompts": {},
+  "sessions": {
+    "s_2ddaf1d0795f96": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "11d45b35-597c-493d-8340-4b6d33183024",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
