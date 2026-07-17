@@ -1,0 +1,39 @@
+pilot/pkg/networking/core/cluster_traffic_policy_test.go
+  s_36f5c1480b0d1f::t_a004bf14041878 32
+pilot/pkg/networking/core/cluster_traffic_policy.go
+  s_36f5c1480b0d1f::t_56893fa655c61a 328
+  s_36f5c1480b0d1f::t_cb3688e1df60d0 334-335,338-341
+  s_36f5c1480b0d1f::t_377bb08b7d58a4 336
+pilot/pkg/networking/core/loadbalancer/loadbalancer.go
+  s_36f5c1480b0d1f::t_4653b704cc0e09 23,30,34
+  s_36f5c1480b0d1f::t_f05e09e13d4658 124-149
+  s_36f5c1480b0d1f::t_7425a21fc8e037 56-57
+  s_36f5c1480b0d1f::t_7677036900ec4b 98,100,102,104,113,123,155,160,162,164,168,178,191
+  s_36f5c1480b0d1f::t_eb0e94437162d9 42-55,58-64,88-97,99,101,103,105-112,114-119,121-122,150-154,156-159,161,163,165-167,169-177,210-211,217,220,226,234-241,243-244,247-256,258-259,266,272,276
+  s_36f5c1480b0d1f::t_a791fdb923fc50 179-190,192-208
+  s_36f5c1480b0d1f::t_dc3fa9e50e21ac 222,228,233,246,268,274
+  s_36f5c1480b0d1f::t_4ef222d675519a 120
+  s_36f5c1480b0d1f::t_14cc618b23eea4 65-87
+pilot/pkg/xds/endpoints/endpoint_builder.go
+  s_36f5c1480b0d1f::t_fe3cd01996f93b 187,193-194,196
+  s_36f5c1480b0d1f::t_9e91385fb17185 459,465-467,471-480,483
+pilot/pkg/networking/core/loadbalancer/loadbalancer_test.go
+  s_36f5c1480b0d1f::t_377bb08b7d58a4 1195,1197
+  s_36f5c1480b0d1f::t_f66e89585f3ead 1188-1194,1196,1198-1199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "5e94201887a95029bcaa1576d3e9244cd1e02a4f",
+  "prompts": {},
+  "sessions": {
+    "s_36f5c1480b0d1f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "99b5fc67-c1bd-46f8-a285-c53bf5b32f8d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
