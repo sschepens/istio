@@ -1,0 +1,23 @@
+tests/integration/pilot/main_test.go
+  s_270a9df6434527::t_8df6fcafdab178 43
+tests/integration/pilot/zone_aware_lb_test.go
+  s_270a9df6434527::t_8649c7d88707c7 169-184
+  s_270a9df6434527::t_a22f6a4d7fbad2 29,32-33
+  s_270a9df6434527::t_65a7088ce41d27 403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "a26079acd54964731f1db84e5937e9d4b766338a",
+  "prompts": {},
+  "sessions": {
+    "s_270a9df6434527": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e20c6617-16d5-4a23-84a6-dc2e6a6a3b67",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
