@@ -1,0 +1,21 @@
+pilot/pkg/xds/nds_test.go
+  s_51ddceaf9fa654::t_329cde8fb7dfba 38,150-156,158,172,177-179,185,189-192,200,210,213-214,221,224-225,233,244-245,251-254,270-271,285,302-304,311,319,322-323,338,344,363-367,374,383,389-390,400-401,410,413,419-420,431-432
+pkg/dns/client/dns.go
+  s_51ddceaf9fa654::t_329cde8fb7dfba 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "934e310aaabdc4e6b63987b3c42d7c240834f690",
+  "prompts": {},
+  "sessions": {
+    "s_51ddceaf9fa654": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cb92396-aa42-45da-80b4-93fd1d132477",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
