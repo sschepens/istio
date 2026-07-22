@@ -1,0 +1,31 @@
+pkg/istio-agent/xds_proxy_test.go
+  s_51ddceaf9fa654::t_7be8f380e14a4d 52-53,621,624-626,628-629
+pilot/pkg/xds/nds_test.go
+  s_51ddceaf9fa654::t_7be8f380e14a4d 131-132,214-235,393-419
+pkg/dns/proto/nds.pb.go
+  s_51ddceaf9fa654::t_7be8f380e14a4d 43-46,88-94,183,185-186,218-224
+pkg/dns/proto/nds.proto
+  s_51ddceaf9fa654::t_7be8f380e14a4d 43-45
+pkg/istio-agent/xds_proxy.go
+  s_51ddceaf9fa654::t_7be8f380e14a4d 641
+pkg/dns/client/dns_test.go
+  s_51ddceaf9fa654::t_7be8f380e14a4d 814-846
+tests/integration/pilot/delta_nds_test.go
+  s_51ddceaf9fa654::t_7be8f380e14a4d 1-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7087bab99e4816c872268161ae6aa3cd0e1ec78d",
+  "prompts": {},
+  "sessions": {
+    "s_51ddceaf9fa654": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cb92396-aa42-45da-80b4-93fd1d132477",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
