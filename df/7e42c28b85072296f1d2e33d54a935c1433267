@@ -1,0 +1,19 @@
+releasenotes/notes/delta-nds.yaml
+  s_51ddceaf9fa654::t_d2a218a87bb0f8 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "df7e42c28b85072296f1d2e33d54a935c1433267",
+  "prompts": {},
+  "sessions": {
+    "s_51ddceaf9fa654": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cb92396-aa42-45da-80b4-93fd1d132477",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
