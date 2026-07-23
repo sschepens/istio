@@ -1,0 +1,21 @@
+pkg/dns/client/dns.go
+  s_51ddceaf9fa654::t_bba53d7235b399 290-292,294-297,720,724-726,731-753
+pkg/dns/client/dns_test.go
+  s_51ddceaf9fa654::t_bba53d7235b399 837-842,848-850
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "60cbda8949ad7b11bcb1496a85af767973b335b4",
+  "prompts": {},
+  "sessions": {
+    "s_51ddceaf9fa654": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cb92396-aa42-45da-80b4-93fd1d132477",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
