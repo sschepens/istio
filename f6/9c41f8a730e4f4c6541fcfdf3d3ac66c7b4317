@@ -1,7 +1,52 @@
+tests/integration/pilot/zoneawarelb/zone_aware_lb_test.go
+  s_a0170725e0f94c::t_63febfe692b994 24,173-176,185,204
+  s_050b05c4d66d5e::t_36dd3f235caa6d 40
+  s_2e12c4e29e9b3f::t_deefd973b9e41e 63-64,105-106,122-125,127,131,134-136,138,143-144,150,152-155,161
+  s_2e12c4e29e9b3f::t_1523e0a10506e2 107-108
+  s_2e12c4e29e9b3f::t_7a1d6c7db4331b 126
+  s_82d493627ab2df::t_79425b0e35e3ad 164-166
+  s_050b05c4d66d5e::t_75253c8ababa5e 167
+  s_2e12c4e29e9b3f::t_bce2f3596e8f23 181,183-184
+  s_a0170725e0f94c::t_04fca11067ca2d 186-187,189,191,197-200
+  s_2e12c4e29e9b3f::t_60948b5eb55150 201-203
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.5.8",
+  "git_ai_version": "1.5.6",
   "base_commit_sha": "f69c41f8a730e4f4c6541fcfdf3d3ac66c7b4317",
-  "prompts": {}
+  "prompts": {},
+  "sessions": {
+    "s_050b05c4d66d5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63fdc442-892f-40fd-be91-56ba002a9ddf",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    },
+    "s_2e12c4e29e9b3f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ef4e9-4c6f-7f93-bc01-91daf60650ec",
+        "model": "gpt-5.5"
+      },
+      "human_author": null
+    },
+    "s_82d493627ab2df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "98d57284-0cb8-44d4-b406-dd38d8d88d37",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    },
+    "s_a0170725e0f94c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e84ec35b-7ba1-4059-88c7-d26d45669b4d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
 }
