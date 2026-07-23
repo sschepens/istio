@@ -1,0 +1,21 @@
+pilot/pkg/networking/core/name_table_delta_test.go
+  s_51ddceaf9fa654::t_d641a86380c623 65,74,167,170,204,206-207,211,213
+pilot/pkg/networking/core/name_table.go
+  s_51ddceaf9fa654::t_d641a86380c623 90-93,141-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "5015f4d106ad22b10c8adefbd0c3958665f4d1e7",
+  "prompts": {},
+  "sessions": {
+    "s_51ddceaf9fa654": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3cb92396-aa42-45da-80b4-93fd1d132477",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "sschepens <sebastian.schepens@mercadolibre.com>"
+    }
+  }
+}
