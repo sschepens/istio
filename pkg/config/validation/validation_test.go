@@ -3377,6 +3377,141 @@ func TestValidateTrafficPolicy(t *testing.T) {
 			},
 			valid: false,
 		},
+		{
+			name: "valid traffic policy, admissionControl only", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						Threshold:               wrapperspb.Double(95),
+						Aggression:              wrapperspb.Double(2),
+						MaximumRejectionPercent: wrapperspb.Double(80),
+					}},
+				},
+			},
+			valid: true,
+		},
+		{
+			name: "valid traffic policy, admissionControl with sampling window", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						SamplingWindow:          &durationpb.Duration{Seconds: 10},
+						Threshold:               wrapperspb.Double(95),
+						Aggression:              wrapperspb.Double(1),
+						MinimumAttemptRate:      wrapperspb.UInt32(2),
+						MaximumRejectionPercent: wrapperspb.Double(80),
+					}},
+				},
+			},
+			valid: true,
+		},
+		{
+			name: "valid traffic policy, admissionControl with success criteria", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						Threshold: wrapperspb.Double(95),
+						SuccessCriteria: &networking.SuccessCriteria{
+							Http: &networking.SuccessCriteria_HttpCriteria{
+								StatusRanges: []*networking.SuccessCriteria_HttpCriteria_StatusRange{
+									{Start: 100, End: 300},
+									{Start: 404, End: 405},
+								},
+							},
+							Grpc: &networking.SuccessCriteria_GrpcCriteria{
+								StatusCodes: []string{"OK", "NOT_FOUND"},
+							},
+						},
+					}},
+				},
+			},
+			valid: true,
+		},
+		{
+			name: "invalid traffic policy, admissionControl with no successRate", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl threshold > 100", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						Threshold: wrapperspb.Double(101),
+					}},
+				},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl aggression < 1", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						Aggression: wrapperspb.Double(0.5),
+					}},
+				},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl maximumRejectionPercent > 100", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						MaximumRejectionPercent: wrapperspb.Double(101),
+					}},
+				},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl negative sampling window", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						SamplingWindow: &durationpb.Duration{Seconds: -1},
+					}},
+				},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl http success criteria with no ranges", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						SuccessCriteria: &networking.SuccessCriteria{
+							Http: &networking.SuccessCriteria_HttpCriteria{},
+						},
+					}},
+				},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl http success criteria range not half-open", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						SuccessCriteria: &networking.SuccessCriteria{
+							Http: &networking.SuccessCriteria_HttpCriteria{
+								StatusRanges: []*networking.SuccessCriteria_HttpCriteria_StatusRange{
+									{Start: 300, End: 100},
+								},
+							},
+						},
+					}},
+				},
+			},
+			valid: false,
+		},
+		{
+			name: "invalid traffic policy, admissionControl grpc success criteria unknown status", in: &networking.TrafficPolicy{
+				AdmissionControl: &networking.AdmissionControlPolicy{
+					Strategy: &networking.AdmissionControlPolicy_SuccessRate{SuccessRate: &networking.SuccessRate{
+						SuccessCriteria: &networking.SuccessCriteria{
+							Grpc: &networking.SuccessCriteria_GrpcCriteria{
+								StatusCodes: []string{"NOT_A_REAL_STATUS"},
+							},
+						},
+					}},
+				},
+			},
+			valid: false,
+		},
 	}
 	for _, c := range cases {
 		if got := validateTrafficPolicy("", c.in).Err; (got == nil) != c.valid {

@@ -185,8 +185,11 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	svcMetaList := im.Fields["services"].GetListValue()
 	svcMetaList.Values = append(svcMetaList.Values, buildServiceMetadata(svc))
 
-	// Apply DestinationRule configuration for the service
-	connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget := selectTrafficPolicyComponents(policy)
+	// Apply DestinationRule configuration for the service.
+	// admissionControl is intentionally discarded here: admission control is a
+	// client-side, per-caller control and is not supported on waypoints in alpha
+	// (a destination waypoint aggregates callers, breaking that model).
+	connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget, _ := selectTrafficPolicyComponents(policy)
 	// Add applicable metadata to the cluster to identify which config is applied for tooling
 	if policy != nil {
 		util.AddConfigInfoMetadata(localCluster.cluster.Metadata, drConfig.Meta)
