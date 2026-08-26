@@ -29,6 +29,7 @@ import (
 
 	envoyadmin "github.com/envoyproxy/go-control-plane/envoy/admin/v3"
 	envoycluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+	envoyadmissioncontrol "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/admission_control/v3"
 	envoyupstreamhttp "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
 	"google.golang.org/grpc/codes"
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
@@ -1671,6 +1672,25 @@ func destinationRuleCases(t TrafficContext) {
 
 		verifyHTTP2Keepalive(ctx, from[0], to)
 	})
+	t.NewSubTest("admissionControl in DR").Run(func(ctx framework.TestContext) {
+		if ctx.Settings().Ambient {
+			ctx.Skip("requires sidecar Envoy cluster config")
+		}
+
+		ctx.ConfigIstio().YAML(
+			t.Apps.Namespace.Name(),
+			admissionControlDestinationRule("admission-control-dr", to.Config().Service),
+		).ApplyOrFail(ctx)
+
+		from[0].CallOrFail(ctx, echo.CallOptions{
+			To:    to,
+			Port:  ports.HTTP,
+			Count: 1,
+			Check: check.OK(),
+		})
+
+		verifyAdmissionControl(ctx, from[0], to)
+	})
 }
 
 func verifyHTTP2Keepalive(t framework.TestContext, from echo.Instance, to echo.Instances) {
@@ -1732,6 +1752,82 @@ func hasHTTP2Keepalive(cfg *envoyadmin.ConfigDump, clusterName string) (bool, er
 			}
 			if keepalive.GetTimeout().GetSeconds() != 5 || keepalive.GetTimeout().GetNanos() != 0 {
 				return false, fmt.Errorf("cluster %q has unexpected HTTP/2 keepalive timeout: %v", clusterName, keepalive.GetTimeout())
+			}
+			return true, nil
+		}
+	}
+
+	return false, fmt.Errorf("cluster %q not found", clusterName)
+}
+
+// verifyAdmissionControl confirms that a DestinationRule's trafficPolicy.admissionControl is
+// translated by a real istiod into the upstream HTTP filter chain on the caller's real Envoy
+// cluster: admission_control followed by the mandatory terminal upstream_codec, with the
+// configured threshold reaching the filter's typed config end to end.
+func verifyAdmissionControl(t framework.TestContext, from echo.Instance, to echo.Instances) {
+	t.Helper()
+
+	clusterName := fmt.Sprintf("outbound|%d||%s", ports.HTTP.ServicePort, to.Config().ClusterLocalFQDN())
+	workloads := from.WorkloadsOrFail(t)
+	if len(workloads) == 0 {
+		t.Fatal("source has no workloads")
+	}
+	sidecar := workloads[0].Sidecar()
+	if sidecar == nil {
+		t.Fatal("source workload has no sidecar")
+	}
+
+	sidecar.WaitForConfigOrFail(t, func(cfg *envoyadmin.ConfigDump) (bool, error) {
+		return hasAdmissionControl(cfg, clusterName)
+	}, retry.Timeout(30*time.Second))
+}
+
+func hasAdmissionControl(cfg *envoyadmin.ConfigDump, clusterName string) (bool, error) {
+	for _, config := range cfg.GetConfigs() {
+		if config.GetTypeUrl() != "type.googleapis.com/envoy.admin.v3.ClustersConfigDump" {
+			continue
+		}
+
+		clusterDump := &envoyadmin.ClustersConfigDump{}
+		if err := config.UnmarshalTo(clusterDump); err != nil {
+			return false, err
+		}
+		for _, dynamicCluster := range clusterDump.GetDynamicActiveClusters() {
+			cluster := &envoycluster.Cluster{}
+			if err := dynamicCluster.GetCluster().UnmarshalTo(cluster); err != nil {
+				return false, err
+			}
+			if cluster.GetName() != clusterName {
+				continue
+			}
+
+			httpOptionsAny := cluster.GetTypedExtensionProtocolOptions()[xdsv3.HttpProtocolOptionsType]
+			if httpOptionsAny == nil {
+				return false, fmt.Errorf("cluster %q has no %s typed extension protocol options", clusterName, xdsv3.HttpProtocolOptionsType)
+			}
+
+			httpOptions := &envoyupstreamhttp.HttpProtocolOptions{}
+			if err := httpOptionsAny.UnmarshalTo(httpOptions); err != nil {
+				return false, err
+			}
+
+			filters := httpOptions.GetHttpFilters()
+			if len(filters) != 2 {
+				return false, fmt.Errorf("cluster %q has %d upstream http filters, want 2 (admission_control, upstream_codec)", clusterName, len(filters))
+			}
+			if filters[0].GetName() != "envoy.filters.http.admission_control" {
+				return false, fmt.Errorf("cluster %q's first upstream filter is %q, want envoy.filters.http.admission_control", clusterName, filters[0].GetName())
+			}
+			if filters[1].GetName() != "envoy.filters.http.upstream_codec" {
+				return false, fmt.Errorf("cluster %q's terminal upstream filter is %q, want envoy.filters.http.upstream_codec", clusterName, filters[1].GetName())
+			}
+
+			admissionControl := &envoyadmissioncontrol.AdmissionControl{}
+			if err := filters[0].GetTypedConfig().UnmarshalTo(admissionControl); err != nil {
+				return false, err
+			}
+			if got := admissionControl.GetSrThreshold().GetDefaultValue().GetValue(); got != 85 {
+				return false, fmt.Errorf("cluster %q admission_control threshold = %v, want 85", clusterName, got)
 			}
 			return true, nil
 		}
@@ -4129,6 +4225,23 @@ spec:
         http2KeepAlive:
           interval: 15s
           timeout: 5s
+---
+`, name, app)
+}
+
+func admissionControlDestinationRule(name, app string) string {
+	return fmt.Sprintf(`apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: %s
+spec:
+  host: %s
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+    admissionControl:
+      successRate:
+        threshold: 85
 ---
 `, name, app)
 }
