@@ -15,6 +15,7 @@
 package core
 
 import (
+	"strings"
 	"time"
 
 	cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -186,10 +187,7 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	svcMetaList.Values = append(svcMetaList.Values, buildServiceMetadata(svc))
 
 	// Apply DestinationRule configuration for the service.
-	// admissionControl is intentionally discarded here: admission control is a
-	// client-side, per-caller control and is not supported on waypoints in alpha
-	// (a destination waypoint aggregates callers, breaking that model).
-	connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget, _ := selectTrafficPolicyComponents(policy)
+	connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget, admissionControl := selectTrafficPolicyComponents(policy)
 	// Add applicable metadata to the cluster to identify which config is applied for tooling
 	if policy != nil {
 		util.AddConfigInfoMetadata(localCluster.cluster.Metadata, drConfig.Meta)
@@ -224,6 +222,12 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	// For these policies, we have the standard logic apply
 	cb.applyConnectionPool(mesh, localCluster, connectionPool, retryBudget)
 	cb.applyH2Upgrade(localCluster, &port, mesh, connectionPool)
+	// Waypoint admission control is scoped to the generated inbound VIP HTTP
+	// cluster. All callers routed through the same service/port/subset cluster
+	// intentionally share its success-rate history and rejection decisions.
+	if subset == "http" || strings.HasPrefix(subset, "http/") {
+		applyAdmissionControlPolicy(localCluster, admissionControl)
+	}
 	applyOutlierDetection(nil, localCluster.cluster, outlierDetection)
 
 	// Unless the svc resolution type is DynamicDNS, we apply the LB settings

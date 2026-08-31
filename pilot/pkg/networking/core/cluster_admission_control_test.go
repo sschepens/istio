@@ -29,6 +29,9 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
 	"istio.io/istio/pilot/test/xdstest"
+	"istio.io/istio/pkg/config"
+	"istio.io/istio/pkg/config/host"
+	"istio.io/istio/pkg/config/protocol"
 )
 
 // admissionControlWithSuccessRate wraps a SuccessRate in the
@@ -207,6 +210,86 @@ func extractAdmissionControl(g *WithT, c *cluster.Cluster) *admissioncontrol.Adm
 	ac := &admissioncontrol.AdmissionControl{}
 	g.Expect(opts.GetHttpFilters()[0].GetTypedConfig().UnmarshalTo(ac)).To(Succeed())
 	return ac
+}
+
+func buildWaypointAdmissionControlCluster(
+	t testing.TB,
+	subset string,
+	portProtocol protocol.Instance,
+	policy *networking.TrafficPolicy,
+) *cluster.Cluster {
+	port := &model.Port{Name: "http", Port: 8080, Protocol: portProtocol}
+	service := &model.Service{
+		Hostname:   host.Name("reviews.default.svc.cluster.local"),
+		Ports:      model.PortList{port},
+		Resolution: model.ClientSideLB,
+		Attributes: model.ServiceAttributes{
+			Name:      "reviews",
+			Namespace: "default",
+		},
+	}
+	cg := NewConfigGenTest(t, TestOptions{
+		Services:   []*model.Service{service},
+		MeshConfig: testMesh(),
+	})
+	proxy := cg.SetupProxy(&model.Proxy{Type: model.Waypoint})
+	cb := NewClusterBuilder(proxy, &model.PushRequest{Push: cg.PushContext()}, model.DisabledCache{})
+
+	return cb.buildWaypointInboundVIPCluster(
+		proxy,
+		service,
+		*port,
+		subset,
+		cg.PushContext().Mesh,
+		policy,
+		&config.Config{},
+	)
+}
+
+// TestAdmissionControlPolicyWaypointCluster verifies the waypoint semantics:
+// admission control is attached to the inbound VIP HTTP cluster, so all callers
+// routed through that service/port/subset cluster share the same success-rate
+// history and rejection decisions.
+func TestAdmissionControlPolicyWaypointCluster(t *testing.T) {
+	g := NewWithT(t)
+	policy := &networking.TrafficPolicy{
+		AdmissionControl: admissionControlWithSuccessRate(&networking.SuccessRate{
+			Threshold: wrapperspb.Double(90),
+		}),
+	}
+
+	c := buildWaypointAdmissionControlCluster(t, "http", protocol.HTTP, policy)
+	g.Expect(c.Name).To(Equal("inbound-vip|8080|http|reviews.default.svc.cluster.local"))
+	ac := extractAdmissionControl(g, c)
+	g.Expect(ac.GetSrThreshold().GetDefaultValue().GetValue()).To(Equal(float64(90)))
+}
+
+func TestAdmissionControlPolicyWaypointAbsent(t *testing.T) {
+	g := NewWithT(t)
+	c := buildWaypointAdmissionControlCluster(t, "http", protocol.HTTP, &networking.TrafficPolicy{})
+
+	opts := extractHTTPProtocolOptions(g, c)
+	if opts != nil {
+		g.Expect(opts.GetHttpFilters()).To(BeEmpty(), "waypoint cluster without policy must not get upstream filters")
+	}
+}
+
+// TestAdmissionControlPolicyWaypointSkipsTCP ensures an HTTP admission-control
+// filter is not injected into the TCP sibling generated for an AUTO port.
+func TestAdmissionControlPolicyWaypointSkipsTCP(t *testing.T) {
+	g := NewWithT(t)
+	policy := &networking.TrafficPolicy{
+		AdmissionControl: admissionControlWithSuccessRate(&networking.SuccessRate{
+			Threshold: wrapperspb.Double(90),
+		}),
+	}
+
+	c := buildWaypointAdmissionControlCluster(t, "tcp", protocol.Unsupported, policy)
+	g.Expect(c.Name).To(Equal("inbound-vip|8080|tcp|reviews.default.svc.cluster.local"))
+	opts := extractHTTPProtocolOptions(g, c)
+	if opts != nil {
+		g.Expect(opts.GetHttpFilters()).To(BeEmpty(), "TCP waypoint cluster must not get upstream HTTP filters")
+	}
 }
 
 // TestAdmissionControlPolicyPortLevel is the port-level case (RFC verification
