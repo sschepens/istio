@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"hash/fnv"
 
-	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/schema/kind"
@@ -50,10 +49,6 @@ type octetPair struct {
 //
 // The current algorithm to allocate IPs is deterministic across all istiods.
 func autoAllocateIPs(services []*model.Service) []*model.Service {
-	// if we are using the IP Autoallocate controller then we can short circuit this
-	if features.EnableIPAutoallocate {
-		return services
-	}
 	hashedServices := make([]*model.Service, maxIPs)
 	hash := fnv.New32a()
 	// First iterate through the range of services and determine its position by hash

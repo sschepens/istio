@@ -24,6 +24,7 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/config"
+	kubelib "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/slices"
@@ -73,7 +74,7 @@ func shouldPodBeInEndpoints(pod *v1.Pod) bool {
 	// "Terminal" describes when a Pod is complete (in a succeeded or failed phase).
 	// This is distinct from the "Terminating" condition which represents when a Pod
 	// is being terminated (metadata.deletionTimestamp is non nil).
-	if isPodPhaseTerminal(pod.Status.Phase) {
+	if kubelib.CheckPodTerminal(pod) {
 		return false
 	}
 
@@ -86,52 +87,6 @@ func shouldPodBeInEndpoints(pod *v1.Pod) bool {
 	}
 
 	return true
-}
-
-// isPodPhaseTerminal returns true if the pod's phase is terminal.
-func isPodPhaseTerminal(phase v1.PodPhase) bool {
-	return phase == v1.PodFailed || phase == v1.PodSucceeded
-}
-
-func IsPodRunning(pod *v1.Pod) bool {
-	return pod.Status.Phase == v1.PodRunning
-}
-
-// IsPodReady is copied from kubernetes/pkg/api/v1/pod/utils.go
-func IsPodReady(pod *v1.Pod) bool {
-	return IsPodReadyConditionTrue(pod.Status)
-}
-
-// IsPodReadyConditionTrue returns true if a pod is ready; false otherwise.
-func IsPodReadyConditionTrue(status v1.PodStatus) bool {
-	condition := GetPodReadyCondition(status)
-	return condition != nil && condition.Status == v1.ConditionTrue
-}
-
-func GetPodReadyCondition(status v1.PodStatus) *v1.PodCondition {
-	_, condition := GetPodCondition(&status, v1.PodReady)
-	return condition
-}
-
-func GetPodCondition(status *v1.PodStatus, conditionType v1.PodConditionType) (int, *v1.PodCondition) {
-	if status == nil {
-		return -1, nil
-	}
-	return GetPodConditionFromList(status.Conditions, conditionType)
-}
-
-// GetPodConditionFromList extracts the provided condition from the given list of condition and
-// returns the index of the condition and the condition. Returns -1 and nil if the condition is not present.
-func GetPodConditionFromList(conditions []v1.PodCondition, conditionType v1.PodConditionType) (int, *v1.PodCondition) {
-	if conditions == nil {
-		return -1, nil
-	}
-	for i := range conditions {
-		if conditions[i].Type == conditionType {
-			return i, &conditions[i]
-		}
-	}
-	return -1, nil
 }
 
 func (pc *PodCache) labelFilter(old, cur *v1.Pod) bool {
@@ -162,19 +117,19 @@ func (pc *PodCache) onEvent(old, pod *v1.Pod, ev model.Event) error {
 	key := config.NamespacedName(pod)
 	switch ev {
 	case model.EventAdd:
-		if shouldPodBeInEndpoints(pod) && IsPodReady(pod) {
+		if shouldPodBeInEndpoints(pod) && kubelib.IsPodReady(pod) {
 			pc.addPod(pod, ip, key, false)
 		} else {
 			return nil
 		}
 	case model.EventUpdate:
-		if !shouldPodBeInEndpoints(pod) || !IsPodReady(pod) {
+		if !shouldPodBeInEndpoints(pod) || !kubelib.IsPodReady(pod) {
 			// delete only if this pod was in the cache
 			if !pc.deleteIP(ip, key) {
 				return nil
 			}
 			ev = model.EventDelete
-		} else if shouldPodBeInEndpoints(pod) && IsPodReady(pod) {
+		} else if shouldPodBeInEndpoints(pod) && kubelib.IsPodReady(pod) {
 			labelUpdated := pc.labelFilter(old, pod)
 			pc.addPod(pod, ip, key, labelUpdated)
 		} else {

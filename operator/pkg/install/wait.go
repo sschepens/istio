@@ -167,7 +167,7 @@ func namespacesReady(namespaces []corev1.Namespace) (bool, []string) {
 func podsReady(pods []corev1.Pod) (bool, []string) {
 	var notReady []string
 	for _, pod := range pods {
-		if !isPodReady(&pod) {
+		if !kube.IsPodReady(&pod) {
 			notReady = append(notReady, "Pod/"+pod.Namespace+"/"+pod.Name)
 		}
 	}
@@ -189,18 +189,6 @@ func crdsReady(crds []apiextensions.CustomResourceDefinition) (bool, []string) {
 		}
 	}
 	return len(notReady) == 0, notReady
-}
-
-func isPodReady(pod *corev1.Pod) bool {
-	if len(pod.Status.Conditions) > 0 {
-		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodReady &&
-				condition.Status == corev1.ConditionTrue {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func deploymentsReady(cs kubernetes.Interface, deployments []deployment, info map[string]string) (bool, []string) {

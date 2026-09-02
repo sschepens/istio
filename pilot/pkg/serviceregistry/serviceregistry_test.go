@@ -94,10 +94,20 @@ func setupTest(t *testing.T) (model.ConfigStoreController, kubernetes.Interface,
 		Debugger:        krt.GlobalDebugHandler,
 	})
 	assert.NoError(t, multiclusterController.Run(stop))
-	se := serviceentry.NewController(configController, xdsUpdater, multiclusterController, meshWatcher)
+	se := serviceentry.NewController(configController, xdsUpdater, multiclusterController, meshWatcher, meshwatcher.NewFixedNetworksWatcher(nil), serviceentry.FeatureFlags{
+		EnableServiceEntrySelectPods:                features.EnableServiceEntrySelectPods,
+		EnableAlphaGatewayAPI:                       features.EnableAlphaGatewayAPI,
+		WorkloadEntryHealthChecks:                   features.WorkloadEntryHealthChecks,
+		EnableDualStack:                             features.EnableDualStack,
+		EnableIPAutoallocate:                        features.EnableIPAutoallocate,
+		CanonicalServiceForMeshExternalServiceEntry: features.CanonicalServiceForMeshExternalServiceEntry,
+		SendUnhealthyEndpoints:                      features.GlobalSendUnhealthyEndpoints.Load() || features.DefaultSendUnhealthyEndpoints.Load(),
+	})
 	client.RunAndWait(stop)
 
-	kc.AppendWorkloadHandler(se.WorkloadInstanceHandler)
+	// The ServiceEntry controller derives the config cluster's Pods from its own krt collection, so
+	// unlike the WorkloadEntry direction below there is no kube -> ServiceEntry workload handler here.
+	// This mirrors kubecontroller.Multicluster.initializeCluster.
 	se.AppendWorkloadHandler(kc.WorkloadInstanceHandler)
 
 	go kc.Run(stop)
@@ -998,13 +1008,17 @@ func TestWorkloadInstances(t *testing.T) {
 		}}
 		expectServiceEndpoints(t, fx, expectedSvc, 80, instances)
 
-		// when pods become unready, we should see the instances being removed from the registry
+		expectServiceEndpointHealth(t, fx, expectedSvc, 80, model.Healthy)
+
+		// When pods become unready the instance stays in the registry, marked unhealthy, so that it can
+		// drain rather than vanish. EDS drops it unless the service asks for unhealthy endpoints.
 		setPodUnready(pod)
 		_, err := kube.CoreV1().Pods(pod.Namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		expectServiceEndpoints(t, fx, expectedSvc, 80, []EndpointResponse{})
+		expectServiceEndpoints(t, fx, expectedSvc, 80, instances)
+		expectServiceEndpointHealth(t, fx, expectedSvc, 80, model.UnHealthy)
 
 		setPodReady(pod)
 		_, err = kube.CoreV1().Pods(pod.Namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
@@ -1012,6 +1026,7 @@ func TestWorkloadInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 		expectServiceEndpoints(t, fx, expectedSvc, 80, instances)
+		expectServiceEndpointHealth(t, fx, expectedSvc, 80, model.Healthy)
 	})
 
 	t.Run("ServiceEntry selects Pod that is Failed without IP", func(t *testing.T) {
@@ -1754,6 +1769,28 @@ func TestSameIPEndpointSlicing(t *testing.T) {
 type EndpointResponse struct {
 	Address string
 	Port    uint32
+}
+
+// expectServiceEndpointHealth asserts every endpoint of svc:port has the given health. Unlike
+// expectServiceEndpoints this looks at the shard contents, which keep unhealthy endpoints; the EDS
+// build step is what filters them out.
+func expectServiceEndpointHealth(t *testing.T, fx *xdsfake.Updater, svc *model.Service, port int, expected model.HealthStatus) {
+	t.Helper()
+	ei := fx.Delegate.(*model.FakeEndpointIndexUpdater).Index
+	retry.UntilSuccessOrFail(t, func() error {
+		got := slices.Map(GetEndpointsForPort(svc, ei, port), func(e *model.IstioEndpoint) model.HealthStatus {
+			return e.HealthStatus
+		})
+		if len(got) == 0 {
+			return fmt.Errorf("no endpoints for %v:%d", svc.Hostname, port)
+		}
+		for _, h := range got {
+			if h != expected {
+				return fmt.Errorf("wanted all endpoints %v, got %v", expected, got)
+			}
+		}
+		return nil
+	}, retry.Converge(2), retry.Timeout(time.Second*2), retry.Delay(time.Millisecond*10))
 }
 
 func expectEndpoints(t *testing.T, s *xds.FakeDiscoveryServer, cluster string, expected []string, metadata *model.NodeMetadata) {

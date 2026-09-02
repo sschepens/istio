@@ -83,6 +83,19 @@ func deleteConfigs(configs []*config.Config, store model.ConfigStore, t testing.
 
 type Event = xdsfake.Event
 
+// testFeatureFlags is what a production caller builds from the features package.
+func testFeatureFlags() FeatureFlags {
+	return FeatureFlags{
+		EnableServiceEntrySelectPods:                features.EnableServiceEntrySelectPods,
+		EnableAlphaGatewayAPI:                       features.EnableAlphaGatewayAPI,
+		WorkloadEntryHealthChecks:                   features.WorkloadEntryHealthChecks,
+		EnableDualStack:                             features.EnableDualStack,
+		EnableIPAutoallocate:                        features.EnableIPAutoallocate,
+		CanonicalServiceForMeshExternalServiceEntry: features.CanonicalServiceForMeshExternalServiceEntry,
+		SendUnhealthyEndpoints:                      features.GlobalSendUnhealthyEndpoints.Load() || features.DefaultSendUnhealthyEndpoints.Load(),
+	}
+}
+
 func initServiceDiscovery(t test.Failer) (model.ConfigStore, *Controller, *xdsfake.Updater) {
 	return initServiceDiscoveryWithOpts(t, false)
 }
@@ -117,7 +130,8 @@ func initServiceDiscoveryWithoutEvents(t test.Failer) (model.ConfigStore, *Contr
 	assert.NoError(t, multiclusterController.Run(stop))
 	client.RunAndWait(stop)
 
-	serviceController := NewController(configController, fx, multiclusterController, meshcfg)
+	serviceController := NewController(configController, fx, multiclusterController, meshcfg,
+		meshwatcher.NewFixedNetworksWatcher(nil), testFeatureFlags())
 	go serviceController.Run(stop)
 	return configController, serviceController
 }
@@ -145,9 +159,10 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	istioStore := configController
 	var controller *Controller
 	if !workloadOnly {
-		controller = NewController(configController, xdsUpdater, multiclusterController, meshcfg, opts...)
+		controller = NewController(configController, xdsUpdater, multiclusterController, meshcfg,
+			meshwatcher.NewFixedNetworksWatcher(nil), testFeatureFlags(), opts...)
 	} else {
-		controller = NewWorkloadEntryController(configController, xdsUpdater, multiclusterController, meshcfg, opts...)
+		controller = NewWorkloadEntryController(configController, xdsUpdater, multiclusterController, meshcfg, testFeatureFlags(), opts...)
 	}
 	assert.NoError(t, multiclusterController.Run(stop))
 	client.RunAndWait(stop)
@@ -2142,7 +2157,6 @@ func sortPorts(ports []*model.Port) {
 
 func Test_legacyAutoAllocateIP_conditions(t *testing.T) {
 	// We are testing the old IP allocation which turns off if the new one is enabled
-	test.SetForTest(t, &features.EnableIPAutoallocate, false)
 	tests := []struct {
 		name         string
 		inServices   []*model.Service
@@ -2343,7 +2357,6 @@ func Test_legacyAutoAllocateIP_conditions(t *testing.T) {
 
 func Test_legacyAutoAllocateIP_values(t *testing.T) {
 	// We are testing the old IP allocation which turns off if the new one is enabled
-	test.SetForTest(t, &features.EnableIPAutoallocate, false)
 	ips := maxIPs
 	inServices := make([]*model.Service, ips)
 	for i := 0; i < ips; i++ {
@@ -2423,7 +2436,6 @@ func BenchmarkAutoAllocateIPs(t *testing.B) {
 // Validate that ipaddress allocation is deterministic based on hash.
 func Test_legacyAutoAllocateIP_deterministic(t *testing.T) {
 	// We are testing the old IP allocation which turns off if the new one is enabled
-	test.SetForTest(t, &features.EnableIPAutoallocate, false)
 	inServices := make([]*model.Service, 0)
 	originalServices := map[string]string{
 		"a.com": "240.240.109.8",
@@ -2509,7 +2521,6 @@ func Test_legacyAutoAllocateIP_deterministic(t *testing.T) {
 func Test_autoAllocateIP_with_duplicated_host(t *testing.T) {
 	// Only the old IP auto-allocator has this functionality
 	// TODO(https://github.com/istio/istio/issues/53676): implement this in the new one, and test both
-	test.SetForTest(t, &features.EnableIPAutoallocate, false)
 	inServices := make([]*model.Service, 0)
 	originalServices := map[string]string{
 		"a.com": "240.240.109.8",

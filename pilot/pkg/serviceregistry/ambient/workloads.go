@@ -694,7 +694,7 @@ func podWorkloadBuilder(
 		// Logic from https://github.com/kubernetes/kubernetes/blob/7c873327b679a70337288da62b96dd610858181d/staging/src/k8s.io/endpointslice/utils.go#L37
 		// Kubernetes has Ready, Serving, and Terminating. We only have a boolean, which is sufficient for our cases
 		status := workloadapi.WorkloadStatus_HEALTHY
-		if !IsPodReady(p) || p.DeletionTimestamp != nil {
+		if !kubeutil.IsPodReady(p) || p.DeletionTimestamp != nil {
 			status = workloadapi.WorkloadStatus_UNHEALTHY
 		}
 		// We only check the network of the first IP. This should be fine; it is not supported for a single pod to span multiple networks

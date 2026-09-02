@@ -232,8 +232,10 @@ func (m *Multicluster) initializeCluster(cluster *multicluster.Cluster, kubeCont
 ) {
 	client := cluster.Client
 
-	if m.serviceEntryController != nil && features.EnableServiceEntrySelectPods {
-		// Add an instance handler in the kubernetes registry to notify service entry store about pod events
+	if m.serviceEntryController != nil && features.EnableServiceEntrySelectPods && !configCluster {
+		// Add an instance handler in the kubernetes registry to notify service entry store about pod events.
+		// The config cluster is excluded: the ServiceEntry controller derives those Pods itself from the
+		// config cluster's krt collection.
 		kubeRegistry.AppendWorkloadHandler(m.serviceEntryController.WorkloadInstanceHandler)
 	}
 
@@ -249,6 +251,15 @@ func (m *Multicluster) initializeCluster(cluster *multicluster.Cluster, kubeCont
 				configStore, options.XDSUpdater,
 				options.MultiClusterController,
 				m.opts.MeshWatcher,
+				serviceentry.FeatureFlags{
+					EnableServiceEntrySelectPods:                features.EnableServiceEntrySelectPods,
+					EnableAlphaGatewayAPI:                       features.EnableAlphaGatewayAPI,
+					WorkloadEntryHealthChecks:                   features.WorkloadEntryHealthChecks,
+					EnableDualStack:                             features.EnableDualStack,
+					EnableIPAutoallocate:                        features.EnableIPAutoallocate,
+					CanonicalServiceForMeshExternalServiceEntry: features.CanonicalServiceForMeshExternalServiceEntry,
+					SendUnhealthyEndpoints:                      features.GlobalSendUnhealthyEndpoints.Load() || features.DefaultSendUnhealthyEndpoints.Load(),
+				},
 				serviceentry.WithClusterID(cluster.ID),
 				serviceentry.WithNetworkIDCb(kubeRegistry.Network),
 				serviceentry.WithKRTDebugger(m.opts.KrtDebugger))
