@@ -427,6 +427,8 @@ func (k workloadKind) String() string {
 type WorkloadInstance struct {
 	Name      string `json:"name,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
+	// Cluster the workload runs in.
+	Cluster cluster.ID `json:"cluster,omitempty"`
 	// Where the workloadInstance come from, valid values are`Pod` or `WorkloadEntry`
 	Kind     workloadKind      `json:"kind"`
 	Endpoint *IstioEndpoint    `json:"endpoint,omitempty"`
@@ -435,8 +437,12 @@ type WorkloadInstance struct {
 	DNSServiceEntryOnly bool `json:"dnsServiceEntryOnly,omitempty"`
 }
 
+// ResourceName uniquely identifies the workload. Kind and cluster are part of the key because a Pod
+// and a WorkloadEntry sharing a name, or the same-named Pod in two clusters, are distinct workloads
+// that a ServiceEntry's workloadSelector has to be able to select both of. Keying on namespace/name
+// alone silently drops one of them.
 func (instance *WorkloadInstance) ResourceName() string {
-	return instance.Namespace + "/" + instance.Name
+	return instance.Kind.String() + "/" + instance.Cluster.String() + "/" + instance.Namespace + "/" + instance.Name
 }
 
 func (instance *WorkloadInstance) GetLabels() map[string]string {

@@ -1191,6 +1191,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels:         expectedLabel,
@@ -1226,6 +1227,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels: map[string]string{
@@ -1258,6 +1260,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels: map[string]string{
@@ -1287,6 +1290,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels: map[string]string{
@@ -1320,6 +1324,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels:         expectedLabel,
@@ -1356,6 +1361,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels: map[string]string{
@@ -1395,6 +1401,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels: map[string]string{
@@ -1441,6 +1448,7 @@ func TestConvertWorkloadEntryToWorkloadInstance(t *testing.T) {
 			},
 			out: &model.WorkloadInstance{
 				Namespace: "ns1",
+				Cluster:   cluster.ID(clusterID),
 				Kind:      model.WorkloadEntryKind,
 				Endpoint: &model.IstioEndpoint{
 					Labels: map[string]string{

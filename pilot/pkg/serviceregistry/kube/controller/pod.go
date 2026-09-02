@@ -170,6 +170,7 @@ func (pc *PodCache) notifyWorkloadHandlers(pod *v1.Pod, ev model.Event, ip strin
 	workloadInstance := &model.WorkloadInstance{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
+		Cluster:   pc.c.Cluster(),
 		Kind:      model.PodKind,
 		Endpoint:  ep,
 		PortMap:   getPortMap(pod),

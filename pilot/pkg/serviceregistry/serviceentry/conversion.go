@@ -501,6 +501,7 @@ func convertWorkloadEntryToWorkloadInstance(
 		PortMap:             we.Ports,
 		Namespace:           meta.Namespace,
 		Name:                meta.Name,
+		Cluster:             clusterID,
 		Kind:                model.WorkloadEntryKind,
 		DNSServiceEntryOnly: dnsServiceEntryOnly,
 	}
