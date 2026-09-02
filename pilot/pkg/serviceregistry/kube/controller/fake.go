@@ -26,7 +26,6 @@ import (
 	"istio.io/istio/pilot/pkg/serviceregistry/util/xdsfake"
 	"istio.io/istio/pkg/activenotifier"
 	"istio.io/istio/pkg/cluster"
-	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	kubelib "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/kclient"
@@ -45,7 +44,7 @@ const (
 type FakeControllerOptions struct {
 	Client            kubelib.Client
 	CRDs              []schema.GroupVersionResource
-	NetworksWatcher   mesh.NetworksWatcher
+	NetworksWatcher   meshwatcher.NetworksWatcherCollection
 	MeshWatcher       meshwatcher.WatcherCollection
 	ServiceHandler    model.ServiceHandler
 	ClusterID         cluster.ID

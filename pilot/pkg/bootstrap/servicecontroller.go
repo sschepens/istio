@@ -41,9 +41,20 @@ func (s *Server) initServiceControllers(args *PilotArgs) error {
 		s.XDSServer,
 		s.multiclusterController,
 		s.environment.Watcher,
+		s.environment.NetworksWatcher,
+		serviceentry.FeatureFlags{
+			EnableServiceEntrySelectPods:                features.EnableServiceEntrySelectPods,
+			EnableAlphaGatewayAPI:                       features.EnableAlphaGatewayAPI,
+			WorkloadEntryHealthChecks:                   features.WorkloadEntryHealthChecks,
+			EnableDualStack:                             features.EnableDualStack,
+			EnableIPAutoallocate:                        features.EnableIPAutoallocate,
+			CanonicalServiceForMeshExternalServiceEntry: features.CanonicalServiceForMeshExternalServiceEntry,
+			SendUnhealthyEndpoints:                      features.GlobalSendUnhealthyEndpoints.Load() || features.DefaultSendUnhealthyEndpoints.Load(),
+		},
 		serviceentry.WithClusterID(s.clusterID),
 		serviceentry.WithKRTDebugger(s.krtDebugger),
 		serviceentry.WithDomainSuffix(args.RegistryOptions.KubeOptions.DomainSuffix),
+		serviceentry.WithSystemNamespace(args.Namespace),
 	)
 	serviceControllers.AddRegistry(s.serviceEntryController)
 
