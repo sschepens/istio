@@ -39,6 +39,7 @@ import (
 	"istio.io/istio/pkg/kube/kclient/clienttest"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/test/util/retry"
@@ -371,7 +372,7 @@ func TestServiceEntrySelectsPods(t *testing.T) {
 					got = append(got, i.Endpoint.FirstAddressOrNil()+"/"+health)
 				}
 			}
-			return assert.Compare(got, want)
+			return assert.Compare(slices.Sort(got), want)
 		}, retry.Timeout(time.Second*5))
 	}
 
@@ -380,7 +381,7 @@ func TestServiceEntrySelectsPods(t *testing.T) {
 		expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
 		retry.UntilSuccessOrFail(t, func() error {
 			key := (&model.WorkloadInstance{
-				Kind: model.PodKind, Namespace: "ns1", Name: "pod1",
+				Kind: model.PodKind, Cluster: client.ClusterID(), Namespace: "ns1", Name: "pod1",
 			}).ResourceName()
 			wi := sd.outputs.AllWorkloads.GetKey(key)
 			if wi == nil {
@@ -443,4 +444,52 @@ func TestServiceEntrySelectsPods(t *testing.T) {
 		pods.Delete("pod1", "ns1")
 		expectPodEndpoints(t, nil)
 	})
+}
+
+// TestServiceEntrySelectsPodAndWorkloadEntryWithSameName covers the key collision that
+// WorkloadInstance.ResourceName used to have: a Pod and a WorkloadEntry sharing namespace/name are
+// distinct workloads, and a selector has to be able to select both.
+func TestServiceEntrySelectsPodAndWorkloadEntryWithSameName(t *testing.T) {
+	store, sd, client := initPodServiceDiscovery(t, nil)
+	pods := clienttest.NewWriter[*corev1.Pod](t, client)
+
+	se := &config.Config{
+		Meta: config.Meta{
+			GroupVersionKind:  gvk.ServiceEntry,
+			Name:              "selector",
+			Namespace:         "ns1",
+			CreationTimestamp: GlobalTime,
+		},
+		Spec: &networking.ServiceEntry{
+			Hosts:            []string{"selector.com"},
+			Ports:            []*networking.ServicePort{{Number: 444, Name: "http", Protocol: "http"}},
+			WorkloadSelector: &networking.WorkloadSelector{Labels: map[string]string{"app": "wle"}},
+			Resolution:       networking.ServiceEntry_STATIC,
+		},
+	}
+	// Deliberately the same namespace/name as the pod.
+	wle := &config.Config{
+		Meta: config.Meta{
+			GroupVersionKind:  gvk.WorkloadEntry,
+			Name:              "pod1",
+			Namespace:         "ns1",
+			CreationTimestamp: GlobalTime,
+		},
+		Spec: &networking.WorkloadEntry{
+			Address: "5.6.7.8",
+			Labels:  map[string]string{"app": "wle"},
+		},
+	}
+	createConfigs([]*config.Config{se, wle}, store, t)
+	pods.CreateOrUpdateStatus(testPod(nil))
+
+	retry.UntilSuccessOrFail(t, func() error {
+		var got []string
+		for _, i := range sd.outputs.ServiceInstances.List() {
+			if i.Service.Hostname == "selector.com" {
+				got = append(got, i.Endpoint.FirstAddressOrNil())
+			}
+		}
+		return assert.Compare(slices.Sort(got), []string{"1.2.3.4", "5.6.7.8"})
+	}, retry.Timeout(time.Second*5))
 }
