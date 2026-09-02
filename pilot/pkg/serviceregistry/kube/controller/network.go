@@ -32,7 +32,7 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/host"
-	"istio.io/istio/pkg/config/mesh"
+	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/kubetypes"
@@ -47,7 +47,7 @@ type networkManager struct {
 	clusterID cluster.ID
 
 	gatewayResourceClient kclient.Informer[*gatewayv1.Gateway]
-	meshNetworksWatcher   mesh.NetworksWatcher
+	meshNetworksWatcher   meshwatcher.NetworksWatcherCollection
 
 	// Network name for to be used when the meshNetworks fromRegistry nor network label on pod is specified
 	// This is defined by a topology.istio.io/network label on the system namespace.

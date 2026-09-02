@@ -122,7 +122,7 @@ type Environment struct {
 	// network. Each network provides information about the endpoints in a
 	// routable L3 network. A single routable L3 network can have one or more
 	// service registries.
-	NetworksWatcher mesh.NetworksWatcher
+	NetworksWatcher meshwatcher.NetworksWatcherCollection
 
 	NetworkManager *NetworkManager
 

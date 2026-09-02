@@ -31,6 +31,7 @@ import (
 	configaggregate "istio.io/istio/pilot/pkg/config/aggregate"
 	"istio.io/istio/pilot/pkg/config/kube/crd"
 	"istio.io/istio/pilot/pkg/config/memory"
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry"
 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
@@ -69,7 +70,7 @@ type TestOptions struct {
 
 	// If provided, this mesh config will be used
 	MeshConfig      *meshconfig.MeshConfig
-	NetworksWatcher mesh.NetworksWatcher
+	NetworksWatcher meshwatcher.NetworksWatcherCollection
 
 	// Additional service registries to use. A ServiceEntry and memory registry will always be created.
 	ServiceRegistries []serviceregistry.Instance
@@ -159,6 +160,10 @@ func NewConfigGenTest(t test.Failer, opts TestOptions) *ConfigGenTest {
 		env.Watcher,
 	)
 
+	if opts.NetworksWatcher == nil {
+		opts.NetworksWatcher = meshwatcher.NewFixedNetworksWatcher(nil)
+	}
+
 	client := kube.NewFakeClient()
 	mc := multicluster.NewController(multicluster.ControllerOptions{
 		Client:          client,
@@ -178,8 +183,19 @@ func NewConfigGenTest(t test.Failer, opts TestOptions) *ConfigGenTest {
 		xdsUpdater,
 		mc,
 		env.Watcher,
+		opts.NetworksWatcher,
+		serviceentry.FeatureFlags{
+			EnableServiceEntrySelectPods:                features.EnableServiceEntrySelectPods,
+			EnableAlphaGatewayAPI:                       features.EnableAlphaGatewayAPI,
+			WorkloadEntryHealthChecks:                   features.WorkloadEntryHealthChecks,
+			EnableDualStack:                             features.EnableDualStack,
+			EnableIPAutoallocate:                        features.EnableIPAutoallocate,
+			CanonicalServiceForMeshExternalServiceEntry: features.CanonicalServiceForMeshExternalServiceEntry,
+			SendUnhealthyEndpoints:                      features.GlobalSendUnhealthyEndpoints.Load() || features.DefaultSendUnhealthyEndpoints.Load(),
+		},
 		serviceentry.WithClusterID(opts.ClusterID),
 		serviceentry.WithKRTDebugger(krt.GlobalDebugHandler),
+		serviceentry.WithSystemNamespace(env.Mesh().RootNamespace),
 	)
 	// TODO allow passing in registry, for k8s, mem registry
 	serviceDiscovery.AddRegistry(se)
@@ -198,9 +214,6 @@ func NewConfigGenTest(t test.Failer, opts TestOptions) *ConfigGenTest {
 	serviceDiscovery.AddRegistry(memserviceRegistry)
 	for _, reg := range opts.ServiceRegistries {
 		serviceDiscovery.AddRegistry(reg)
-	}
-	if opts.NetworksWatcher == nil {
-		opts.NetworksWatcher = meshwatcher.NewFixedNetworksWatcher(nil)
 	}
 	env.ServiceDiscovery = serviceDiscovery
 	env.ConfigStore = configController

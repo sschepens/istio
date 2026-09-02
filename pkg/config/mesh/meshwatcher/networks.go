@@ -45,4 +45,4 @@ func (n networksAdapter) DeleteNetworksHandler(registration *mesh.WatcherHandler
 	registration.Remove()
 }
 
-var _ mesh.NetworksWatcher = networksAdapter{}
+var _ NetworksWatcherCollection = networksAdapter{}

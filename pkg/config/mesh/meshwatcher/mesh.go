@@ -93,8 +93,15 @@ func (m MeshNetworksResource) Equals(other MeshNetworksResource) bool {
 	return proto.Equal(m.MeshNetworks, other.MeshNetworks)
 }
 
-// NetworksAdapter wraps a MeshNetworks collection into a mesh.NetworksWatcher interface.
-func NetworksAdapter(configuration krt.Singleton[MeshNetworksResource]) mesh.NetworksWatcher {
+// NetworksWatcherCollection is an interface to describe an object that implements both the legacy mesh.NetworksWatcher
+// interface and the new krt interface.
+type NetworksWatcherCollection interface {
+	mesh.NetworksWatcher
+	krt.Singleton[MeshNetworksResource]
+}
+
+// NetworksAdapter wraps a MeshNetworks collection into a NetworksWatcherCollection interface.
+func NetworksAdapter(configuration krt.Singleton[MeshNetworksResource]) NetworksWatcherCollection {
 	return networksAdapter{configuration}
 }
 
