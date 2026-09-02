@@ -85,6 +85,7 @@ func convertPodToWorkloadInstance(
 	return &model.WorkloadInstance{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
+		Cluster:   clusterID,
 		Kind:      model.PodKind,
 		Endpoint: &model.IstioEndpoint{
 			Labels:         lbls,
