@@ -233,3 +233,12 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect
 )
+
+// Local-only dev convenience: points istio.io/api at a sibling checkout of the
+// api repo so this branch can build against its unpublished admissionControl
+// changes before that repo's PR lands and gets an official pseudo-version pin.
+// Must stay commented out on this branch — a real ../api path only exists on
+// the machine developing both repos together, so an active replace here would
+// break checkouts/CI anywhere else. Uncomment locally only if you've cloned
+// both repos as siblings, then delete before pushing/merging.
+// replace istio.io/api => ../api

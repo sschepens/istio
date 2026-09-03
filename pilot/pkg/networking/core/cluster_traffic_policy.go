@@ -45,7 +45,7 @@ import (
 // applyTrafficPolicy applies the trafficPolicy defined within destinationRule,
 // which can be called for both outbound and inbound cluster, but only connection pool will be applied to inbound cluster.
 func (cb *ClusterBuilder) applyTrafficPolicy(service *model.Service, opts buildClusterOpts) {
-	connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget := selectTrafficPolicyComponents(opts.policy)
+	connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget, admissionControl := selectTrafficPolicyComponents(opts.policy)
 	// Connection pool settings are applicable for both inbound and outbound clusters.
 	if connectionPool == nil {
 		connectionPool = &networking.ConnectionPoolSettings{}
@@ -60,6 +60,7 @@ func (cb *ClusterBuilder) applyTrafficPolicy(service *model.Service, opts buildC
 		if outlierDetection != nil && len(outlierDetection.OutlierDetectionHttpErrorCodes) > 0 {
 			applyOutlierDetectionErrorCodes(opts.mutable, outlierDetection.OutlierDetectionHttpErrorCodes)
 		}
+		applyAdmissionControlPolicy(opts.mutable, admissionControl)
 		enableSelfDiscovery := cb.proxyMetadata != nil && bool(cb.proxyMetadata.EnableSelfDiscovery)
 		applyLoadBalancer(
 			service, opts.mutable.cluster, loadBalancer, opts.port, cb.locality,
@@ -121,9 +122,10 @@ func selectTrafficPolicyComponents(policy *networking.TrafficPolicy) (
 	*networking.ClientTLSSettings,
 	*networking.TrafficPolicy_ProxyProtocol,
 	*networking.TrafficPolicy_RetryBudget,
+	*networking.AdmissionControlPolicy,
 ) {
 	if policy == nil {
-		return nil, nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil, nil
 	}
 	connectionPool := policy.ConnectionPool
 	outlierDetection := policy.OutlierDetection
@@ -131,8 +133,9 @@ func selectTrafficPolicyComponents(policy *networking.TrafficPolicy) (
 	tls := policy.Tls
 	proxyProtocol := policy.ProxyProtocol
 	retryBudget := policy.RetryBudget
+	admissionControl := policy.AdmissionControl
 
-	return connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget
+	return connectionPool, outlierDetection, loadBalancer, tls, proxyProtocol, retryBudget, admissionControl
 }
 
 // FIXME: there isn't a way to distinguish between unset values and zero values

@@ -1038,7 +1038,7 @@ func validateTrafficPolicy(configNamespace string, policy *networking.TrafficPol
 	}
 	if policy.OutlierDetection == nil && policy.ConnectionPool == nil &&
 		policy.LoadBalancer == nil && policy.Tls == nil && policy.PortLevelSettings == nil && policy.Tunnel == nil && policy.ProxyProtocol == nil &&
-		policy.RetryBudget == nil {
+		policy.RetryBudget == nil && policy.AdmissionControl == nil {
 		return WrapError(fmt.Errorf("traffic policy must have at least one field"))
 	}
 
@@ -1052,7 +1052,8 @@ func validateTrafficPolicy(configNamespace string, policy *networking.TrafficPol
 		agent.ValidateTLS(configNamespace, policy.Tls),
 		validatePortTrafficPolicies(configNamespace, policy.PortLevelSettings),
 		validateTunnelSettings(policy.Tunnel),
-		validateProxyProtocol(policy.ProxyProtocol))
+		validateProxyProtocol(policy.ProxyProtocol),
+		validateAdmissionControlPolicy(policy.AdmissionControl))
 }
 
 func validateProxyProtocol(proxyProtocol *networking.TrafficPolicy_ProxyProtocol) (errs error) {
@@ -1081,6 +1082,63 @@ func validateTunnelSettings(tunnel *networking.TrafficPolicy_TunnelSettings) (er
 		errs = appendErrors(errs, fmt.Errorf("tunnel target port is invalid: %s", err))
 	}
 	return errs
+}
+
+func validateAdmissionControlPolicy(acp *networking.AdmissionControlPolicy) (errs error) {
+	if acp == nil {
+		return
+	}
+	sr := acp.GetSuccessRate()
+	if sr == nil {
+		return fmt.Errorf("admissionControl must specify a strategy (successRate)")
+	}
+	if sr.SamplingWindow != nil {
+		errs = appendErrors(errs, agent.ValidateDuration(sr.SamplingWindow))
+	}
+	if sr.Threshold != nil && (sr.Threshold.GetValue() < 0 || sr.Threshold.GetValue() > 100) {
+		errs = appendErrors(errs, fmt.Errorf("successRate threshold must be in [0, 100], got %g", sr.Threshold.GetValue()))
+	}
+	if sr.Aggression != nil && sr.Aggression.GetValue() < 1.0 {
+		errs = appendErrors(errs, fmt.Errorf("successRate aggression must be >= 1, got %g", sr.Aggression.GetValue()))
+	}
+	if sr.MaximumRejectionPercent != nil && (sr.MaximumRejectionPercent.GetValue() < 0 || sr.MaximumRejectionPercent.GetValue() > 100) {
+		errs = appendErrors(errs, fmt.Errorf("successRate maximumRejectionPercent must be in [0, 100], got %g", sr.MaximumRejectionPercent.GetValue()))
+	}
+	errs = appendErrors(errs, validateSuccessCriteria(sr.GetSuccessCriteria()))
+	return
+}
+
+// validateSuccessCriteria enforces the half-open HTTP range contract
+// (100 <= start < end <= 600, matching Envoy's admission-control HTTP status
+// bounds) and requires gRPC status names to be canonical names Istiod can
+// translate to Envoy numeric codes.
+func validateSuccessCriteria(sc *networking.SuccessCriteria) (errs error) {
+	if sc == nil {
+		return
+	}
+	if h := sc.GetHttp(); h != nil {
+		if len(h.GetStatusRanges()) == 0 {
+			errs = appendErrors(errs, fmt.Errorf("successCriteria.http must have at least one statusRange"))
+		}
+		for _, r := range h.GetStatusRanges() {
+			start, end := r.GetStart(), r.GetEnd()
+			if start < 100 || end > 600 || start >= end {
+				errs = appendErrors(errs, fmt.Errorf(
+					"successCriteria.http statusRange must satisfy 100 <= start < end <= 600, got [%d, %d)", start, end))
+			}
+		}
+	}
+	if g := sc.GetGrpc(); g != nil {
+		if len(g.GetStatusCodes()) == 0 {
+			errs = appendErrors(errs, fmt.Errorf("successCriteria.grpc must have at least one statusCode"))
+		}
+		for _, name := range g.GetStatusCodes() {
+			if _, ok := grpc.SupportedGRPCStatus[name]; !ok {
+				errs = appendErrors(errs, fmt.Errorf("successCriteria.grpc status %q is not a supported canonical gRPC status name", name))
+			}
+		}
+	}
+	return
 }
 
 func validateOutlierDetection(outlier *networking.OutlierDetection) (errs Validation) {
@@ -1287,13 +1345,14 @@ func validatePortTrafficPolicies(configNamespace string, pls []*networking.Traff
 			errs = appendErrors(errs, fmt.Errorf("portTrafficPolicy must have valid port"))
 		}
 		if t.OutlierDetection == nil && t.ConnectionPool == nil &&
-			t.LoadBalancer == nil && t.Tls == nil {
+			t.LoadBalancer == nil && t.Tls == nil && t.AdmissionControl == nil {
 			errs = appendErrors(errs, fmt.Errorf("port traffic policy must have at least one field"))
 		} else {
 			errs = appendErrors(errs, validateOutlierDetection(t.OutlierDetection),
 				validateConnectionPool(t.ConnectionPool),
 				validateLoadBalancer(t.LoadBalancer, t.OutlierDetection),
-				agent.ValidateTLS(configNamespace, t.Tls))
+				agent.ValidateTLS(configNamespace, t.Tls),
+				validateAdmissionControlPolicy(t.AdmissionControl))
 		}
 	}
 	return errs
