@@ -1,0 +1,9 @@
+apiVersion: release-notes/v2
+kind: bug-fix
+area: traffic-management
+releaseNotes:
+  - |
+    **Fixed** a pod in a remote cluster, selected by a `ServiceEntry`, being removed as an endpoint
+    as soon as it became unready or started terminating, rather than being reported as an unhealthy
+    endpoint so that it can drain. This now matches how the pods of a Kubernetes `Service` are
+    handled, and honors `PILOT_SEND_UNHEALTHY_ENDPOINTS`.
