@@ -364,6 +364,9 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 			continue
 		}
 		cg.ServiceEntryRegistry.AppendWorkloadHandler(k8s.WorkloadInstanceHandler)
+		// Unlike production, where the ServiceEntry registry derives Pods from the clusters' own krt
+		// collections, these fake kube controllers have their own clients: NewConfigGenTest builds the
+		// ServiceEntry registry over a separate (empty) one, so its Pods can only get there this way.
 		k8s.AppendWorkloadHandler(cg.ServiceEntryRegistry.WorkloadInstanceHandler)
 	}
 	s.WorkloadEntryController = autoregistration.NewController(cg.Store(), "test", keepalive.Infinity)

@@ -155,7 +155,7 @@ func (pc *PodCache) notifyWorkloadHandlers(pod *v1.Pod, ev model.Event, ip strin
 		return
 	}
 	healthStatus := model.UnHealthy
-	if IsPodReady(pod) {
+	if kubelib.IsPodReady(pod) {
 		healthStatus = model.Healthy
 	}
 	// fire instance handles for workload

@@ -20,6 +20,7 @@
 package meshnetworks
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/yl2chen/cidranger"
@@ -100,7 +101,7 @@ func (m MeshNetworkInfo) NetworkForEndpoint(endpointIP string, lbls labels.Insta
 			log.Warnf("Found multiple networks CIDRs matching the endpoint IP: %s. Using the first match.", endpointIP)
 		}
 		if len(entries) > 0 {
-			return (entries[0].(namedRangerEntry)).name
+			return entries[0].(namedRangerEntry).name
 		}
 	}
 
@@ -125,31 +126,38 @@ func (n namedRangerEntry) Network() net.IPNet {
 	return n.network
 }
 
-// LocalMeshNetworkInfo builds the MeshNetworkInfo for clusterID. localNamespaces must be the
-// namespaces of the cluster systemNamespace lives in.
-func LocalMeshNetworkInfo(
-	localNamespaces krt.Collection[*corev1.Namespace],
+// SystemNamespaceNetwork returns the network a cluster belongs to, read from the topology label on
+// its system namespace. A cluster whose system namespace is absent, or carries no label, is part of
+// the default (empty) network. namespaces must be the namespaces of the cluster in question.
+//
+// Only the label is fetched, so a caller does not recompute on unrelated changes to the namespace.
+func SystemNamespaceNetwork(ctx krt.HandlerContext, namespaces krt.Collection[*corev1.Namespace], systemNamespace string) network.ID {
+	nw := krt.PartialFetchComparable(ctx, namespaces, func(ns *corev1.Namespace) string {
+		if ns == nil {
+			return ""
+		}
+		return ns.Labels[label.TopologyNetwork.Name]
+	}, krt.FilterKey(systemNamespace))
+	if len(nw) == 0 {
+		return ""
+	}
+	return network.ID(nw[0])
+}
+
+// NewClusterSingleton builds the MeshNetworkInfo for clusterID. namespaces must be the namespaces
+// of that cluster: it is that cluster's system namespace whose topology label names the network its
+// workloads default to, and only that cluster's ID that a network's fromRegistry entry can name.
+// The result is therefore per cluster, even though the MeshNetworks config it derives from is not.
+func NewClusterSingleton(
+	namespaces krt.Collection[*corev1.Namespace],
 	meshNetworks meshwatcher.NetworksWatcherCollection,
 	systemNamespace string,
 	clusterID cluster.ID,
 	opts krt.OptionsBuilder,
 ) krt.Singleton[MeshNetworkInfo] {
-	LocalSystemNamespaceNetwork := krt.NewSingleton(func(ctx krt.HandlerContext) *network.ID {
-		ns := ptr.Flatten(krt.FetchOne(ctx, localNamespaces, krt.FilterKey(systemNamespace)))
-		if ns == nil {
-			return nil
-		}
-		nw, f := ns.Labels[label.TopologyNetwork.Name]
-		if !f {
-			return nil
-		}
-		return ptr.Of(network.ID(nw))
-	}, opts.WithName("LocalSystemNamespaceNetwork")...)
-
 	return krt.NewSingleton(func(ctx krt.HandlerContext) *MeshNetworkInfo {
-		networkFromSystemNamespace := ptr.OrEmpty(krt.FetchOne(ctx, LocalSystemNamespaceNetwork.AsCollection()))
 		mni := MeshNetworkInfo{
-			NetworkFromSystemNamespace:  networkFromSystemNamespace,
+			NetworkFromSystemNamespace:  SystemNamespaceNetwork(ctx, namespaces, systemNamespace),
 			RegistryServiceNameGateways: make(map[host.Name][]model.NetworkGateway),
 		}
 		networks := ptr.OrEmpty(krt.FetchOne(ctx, meshNetworks.AsCollection()))
@@ -205,5 +213,5 @@ func LocalMeshNetworkInfo(
 		mni.Ranger = ranger
 
 		return &mni
-	}, opts.WithName("MeshNetworkInfo")...)
+	}, opts.WithName(fmt.Sprintf("MeshNetworkInfo[%s]", clusterID))...)
 }

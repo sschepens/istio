@@ -100,7 +100,7 @@ func (cc ClusterCollections) GetStop() <-chan struct{} {
 
 // MeshConfig returns the mesh config for this generation of the cluster.
 func (cc ClusterCollections) MeshConfig() krt.Singleton[meshwatcher.MeshConfigResource] {
-	return cc.cluster.meshConfig()
+	return cc.cluster.MeshConfig()
 }
 
 // Namespaces returns the namespaces collection.
@@ -200,7 +200,7 @@ type remoteClusterCollections struct {
 // applied - therefore never syncs and never reaches those consumers. Reading it directly instead, as
 // mesh.Watcher, yields a nil Mesh() until then; that is what mesh.NewRestrictedConfigWatcher's
 // fallback to the config cluster covers.
-func (c *Cluster) meshConfig() krt.Singleton[meshwatcher.MeshConfigResource] {
+func (c *Cluster) MeshConfig() krt.Singleton[meshwatcher.MeshConfigResource] {
 	return c.remoteClusterCollections.Load().meshConfig
 }
 
@@ -289,7 +289,7 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 	if c.remoteClusterCollections.Load() != nil {
 		log.Infof("Configuring cluster %s with existing informers", c.ID)
 		syncers := []krt.Syncer{
-			c.meshConfig().AsCollection(),
+			c.MeshConfig().AsCollection(),
 			c.namespaces(),
 			c.gateways(),
 			c.services(),
@@ -343,7 +343,7 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 	filter := filter.NewDiscoveryNamespacesFilter(namespaces, mesh, c.stop)
 	kube.SetObjectFilter(c.Client, filter)
 
-	c.remoteClusterCollections.Store(buildClusterCollections(c.Client, c.ID, c.meshConfig(mesh, opts), opts))
+	c.remoteClusterCollections.Store(buildClusterCollections(c.Client, c.ID, c.buildMeshConfig(mesh, opts), opts))
 
 	// Invoke handler callbacks (clusterAdded/clusterUpdated)
 	syncers := make([]ComponentConstraint, 0, len(handlers))
@@ -373,7 +373,7 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 
 	// Also wait for KRT collections to sync
 	krtSyncers := []krt.Syncer{
-		c.meshConfig().AsCollection(),
+		c.MeshConfig().AsCollection(),
 		c.namespaces(),
 		c.gateways(),
 		c.services(),
@@ -397,10 +397,10 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 	c.closeSyncedCh()
 }
 
-// meshConfig builds the collection behind Cluster.MeshConfig: a remote cluster's own mesh ConfigMap,
+// buildMeshConfig builds the collection behind ClusterCollections.MeshConfig: a remote cluster's own mesh ConfigMap,
 // merged over the defaults the same way istiod merges its own. A cluster with no ConfigMap name
 // configured (the config cluster, and tests) uses the mesh config it was given instead.
-func (c *Cluster) meshConfig(mesh meshwatcher.WatcherCollection, opts krt.OptionsBuilder) krt.Singleton[meshwatcher.MeshConfigResource] {
+func (c *Cluster) buildMeshConfig(mesh meshwatcher.WatcherCollection, opts krt.OptionsBuilder) krt.Singleton[meshwatcher.MeshConfigResource] {
 	if c.meshConfigMapName == "" {
 		return mesh
 	}
@@ -550,7 +550,7 @@ func (c *Cluster) reportStatus(status string) {
 
 func (c *Cluster) hasInitialCollections() bool {
 	return c.remoteClusterCollections.Load() != nil &&
-		c.meshConfig() != nil &&
+		c.MeshConfig() != nil &&
 		c.namespaces() != nil &&
 		c.gateways() != nil &&
 		c.services() != nil &&
