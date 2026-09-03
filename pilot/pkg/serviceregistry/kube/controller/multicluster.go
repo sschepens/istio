@@ -34,12 +34,10 @@ import (
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
 	"istio.io/istio/pilot/pkg/serviceregistry/serviceentry"
 	"istio.io/istio/pkg/backoff"
-	"istio.io/istio/pkg/config/mesh/kubemesh"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/collection"
 	"istio.io/istio/pkg/config/schema/collections"
 	kubelib "istio.io/istio/pkg/kube"
-	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/webhooks"
@@ -171,26 +169,15 @@ func NewMulticluster(
 		log.Infof("Initializing Kubernetes service registry %q", options.ClusterID)
 		options.ConfigCluster = configCluster
 
-		// Create per-cluster mesh watcher for remote clusters
-		// This allows controllers to detect cluster-specific settings that may be relevant for the local proxies, e.g. trust domain.
+		// Use the remote cluster's own mesh config, so that controllers pick up cluster-specific
+		// settings that may be relevant for the local proxies, e.g. trust domain. The cluster owns
+		// that collection, so every consumer of it shares one informer.
 		if !configCluster {
 			// Save the config cluster's mesh watcher as fallback for when the remote meshconfig is unreadable
 			// (e.g. during upgrades before RBAC rules are applied to the remote cluster).
 			options.ConfigClusterMeshWatcher = opts.MeshWatcher
-			meshConfigMapName := mc.getMeshConfigMapName()
-			meshSource := kubemesh.NewConfigMapSource(
-				client,
-				options.SystemNamespace,
-				meshConfigMapName,
-				kubemesh.MeshConfigKey,
-				krt.NewOptionsBuilder(stop, "", nil),
-			)
-			remoteMeshCollection := meshwatcher.NewCollection(
-				krt.NewOptionsBuilder(stop, "", nil),
-				meshSource,
-			)
-			options.MeshWatcher = meshwatcher.ConfigAdapter(remoteMeshCollection)
-			log.Infof("Created mesh watcher for remote cluster %q", cluster.ID)
+			options.MeshWatcher = meshwatcher.ConfigAdapter(cluster.MeshConfig())
+			log.Infof("Using mesh config of remote cluster %q", cluster.ID)
 		}
 
 		kubeRegistry := NewController(client, options)
@@ -215,15 +202,6 @@ func NewMulticluster(
 	})
 
 	return mc
-}
-
-// getMeshConfigMapName returns the mesh ConfigMap name based on the revision
-func (m *Multicluster) getMeshConfigMapName() string {
-	name := "istio"
-	if m.revision == "" || m.revision == "default" {
-		return name
-	}
-	return name + "-" + m.revision
 }
 
 // initializeCluster initializes the cluster by setting various handlers.

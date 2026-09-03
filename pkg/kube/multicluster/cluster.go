@@ -27,6 +27,7 @@ import (
 
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pkg/cluster"
+	"istio.io/istio/pkg/config/mesh/kubemesh"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/kube"
@@ -51,6 +52,12 @@ type Cluster struct {
 	kubeConfigSha [sha256.Size]byte
 	// SourceSecret identifies the secret that produced this cluster (for remote clusters).
 	SourceSecret types.NamespacedName
+
+	// systemNamespace and meshConfigMapName locate the cluster's own mesh config. They are set for
+	// remote clusters only: the config cluster's mesh config is istiod's own, and is handed to
+	// buildClusterCollections directly.
+	systemNamespace   string
+	meshConfigMapName string
 
 	stop chan struct{}
 	// initialSync is marked when RunAndWait completes
@@ -80,12 +87,25 @@ type Cluster struct {
 
 // remoteClusterCollections holds per-cluster KRT collections.
 type remoteClusterCollections struct {
+	meshConfig     krt.Singleton[meshwatcher.MeshConfigResource]
 	namespaces     krt.Collection[*corev1.Namespace]
 	pods           krt.Collection[*corev1.Pod]
 	services       krt.Collection[*corev1.Service]
 	endpointSlices krt.Collection[*discovery.EndpointSlice]
 	nodes          krt.Collection[*corev1.Node]
 	gateways       krt.Collection[*gatewayv1.Gateway]
+}
+
+// MeshConfig returns this cluster's mesh config: for a remote cluster the one built from its own mesh
+// ConfigMap, and for the config cluster istiod's own. It is part of the cluster's initial sync, so a
+// consumer that reaches a cluster through Clusters() can depend on it.
+//
+// A cluster that cannot read its mesh ConfigMap at all - during an upgrade, before the reader RBAC is
+// applied - therefore never syncs and never reaches those consumers. Reading it directly instead, as
+// mesh.Watcher, yields a nil Mesh() until then; that is what mesh.NewRestrictedConfigWatcher's
+// fallback to the config cluster covers.
+func (c *Cluster) MeshConfig() krt.Singleton[meshwatcher.MeshConfigResource] {
+	return c.remoteClusterCollections.Load().meshConfig
 }
 
 // Namespaces returns the namespaces collection.
@@ -173,6 +193,7 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 	if c.remoteClusterCollections.Load() != nil {
 		log.Infof("Configuring cluster %s with existing informers", c.ID)
 		syncers := []krt.Syncer{
+			c.MeshConfig().AsCollection(),
 			c.Namespaces(),
 			c.Gateways(),
 			c.Services(),
@@ -226,7 +247,7 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 	filter := filter.NewDiscoveryNamespacesFilter(namespaces, mesh, c.stop)
 	kube.SetObjectFilter(c.Client, filter)
 
-	c.remoteClusterCollections.Store(buildClusterCollections(c.Client, c.ID, opts))
+	c.remoteClusterCollections.Store(buildClusterCollections(c.Client, c.ID, c.meshConfig(mesh, opts), opts))
 
 	// Invoke handler callbacks (clusterAdded/clusterUpdated)
 	syncers := make([]ComponentConstraint, 0, len(handlers))
@@ -256,6 +277,7 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 
 	// Also wait for KRT collections to sync
 	krtSyncers := []krt.Syncer{
+		c.MeshConfig().AsCollection(),
 		c.Namespaces(),
 		c.Gateways(),
 		c.Services(),
@@ -279,9 +301,25 @@ func (c *Cluster) Run(mesh meshwatcher.WatcherCollection, handlers []handler, ac
 	c.closeSyncedCh()
 }
 
+// meshConfig builds the collection behind Cluster.MeshConfig: a remote cluster's own mesh ConfigMap,
+// merged over the defaults the same way istiod merges its own. A cluster with no ConfigMap name
+// configured (the config cluster, and tests) uses the mesh config it was given instead.
+func (c *Cluster) meshConfig(mesh meshwatcher.WatcherCollection, opts krt.OptionsBuilder) krt.Singleton[meshwatcher.MeshConfigResource] {
+	if c.meshConfigMapName == "" {
+		return mesh
+	}
+	source := kubemesh.NewConfigMapSource(c.Client, c.systemNamespace, c.meshConfigMapName, kubemesh.MeshConfigKey, opts)
+	return meshwatcher.NewCollection(opts, source)
+}
+
 // buildClusterCollections creates the standard KRT collections for a cluster.
 // This is used for both config and remote clusters to ensure identical collection setup.
-func buildClusterCollections(client kube.Client, clusterID cluster.ID, opts krt.OptionsBuilder) *remoteClusterCollections {
+func buildClusterCollections(
+	client kube.Client,
+	clusterID cluster.ID,
+	meshConfig krt.Singleton[meshwatcher.MeshConfigResource],
+	opts krt.OptionsBuilder,
+) *remoteClusterCollections {
 	defaultFilter := kclient.Filter{
 		ObjectFilter: client.ObjectFilter(),
 	}
@@ -338,6 +376,7 @@ func buildClusterCollections(client kube.Client, clusterID cluster.ID, opts krt.
 	)...)
 
 	return &remoteClusterCollections{
+		meshConfig:     meshConfig,
 		namespaces:     Namespaces,
 		pods:           Pods,
 		services:       Services,
@@ -415,6 +454,7 @@ func (c *Cluster) reportStatus(status string) {
 
 func (c *Cluster) hasInitialCollections() bool {
 	return c.remoteClusterCollections.Load() != nil &&
+		c.MeshConfig() != nil &&
 		c.Namespaces() != nil &&
 		c.Gateways() != nil &&
 		c.Services() != nil &&

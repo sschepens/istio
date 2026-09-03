@@ -83,6 +83,16 @@ type handler interface {
 	HasSynced() bool
 }
 
+// meshConfigMapName returns the name of the mesh ConfigMap for a revision. This is the ConfigMap a
+// remote cluster's own mesh config is read from, in the system namespace.
+func meshConfigMapName(revision string) string {
+	name := "istio"
+	if revision == "" || revision == "default" {
+		return name
+	}
+	return name + "-" + revision
+}
+
 // ClientBuilder builds a new kube.Client from a kubeconfig. Mocked out for testing
 type ClientBuilder = func(kubeConfig []byte, clusterId cluster.ID, configOverrides ...func(*rest.Config)) (kube.Client, error)
 
@@ -91,6 +101,8 @@ type ControllerOptions struct {
 	Client          kube.Client
 	ClusterID       cluster.ID
 	SystemNamespace string
+	// Revision names the mesh ConfigMap a remote cluster's own mesh config is read from.
+	Revision        string
 	MeshConfig      meshwatcher.WatcherCollection
 	ClientBuilder   ClientBuilder
 	ConfigOverrides []func(*rest.Config)
@@ -112,10 +124,11 @@ type Controller struct {
 
 	cs *ClusterStore
 
-	meshWatcher meshwatcher.WatcherCollection
-	debugger    *krt.DebugHandler
-	stop        chan struct{}
-	handlers    []handler
+	meshWatcher       meshwatcher.WatcherCollection
+	meshConfigMapName string
+	debugger          *krt.DebugHandler
+	stop              chan struct{}
+	handlers          []handler
 
 	clusters krt.Collection[*Cluster]
 }
@@ -172,12 +185,13 @@ func NewController(opts ControllerOptions) *Controller {
 			initialSyncTimeout:       atomic.NewBool(false),
 			remoteClusterCollections: atomic.NewPointer[remoteClusterCollections](nil),
 		},
-		cs:              NewClustersStore(),
-		source:          source,
-		configOverrides: opts.ConfigOverrides,
-		meshWatcher:     opts.MeshConfig,
-		debugger:        opts.Debugger,
-		stop:            make(chan struct{}),
+		cs:                NewClustersStore(),
+		source:            source,
+		configOverrides:   opts.ConfigOverrides,
+		meshWatcher:       opts.MeshConfig,
+		meshConfigMapName: meshConfigMapName(opts.Revision),
+		debugger:          opts.Debugger,
+		stop:              make(chan struct{}),
 	}
 
 	if opts.ClientBuilder != nil {
@@ -205,7 +219,7 @@ func NewController(opts ControllerOptions) *Controller {
 	// The client's ObjectFilter is already set by the caller (server.go / fake.go).
 	clusterOpts := krt.NewOptionsBuilder(controller.stop, fmt.Sprintf("cluster[%s]", opts.ClusterID), opts.Debugger)
 	controller.configCluster.remoteClusterCollections.Store(
-		buildClusterCollections(opts.Client, opts.ClusterID, clusterOpts),
+		buildClusterCollections(opts.Client, opts.ClusterID, opts.MeshConfig, clusterOpts),
 	)
 
 	return controller
@@ -407,6 +421,8 @@ func (c *Controller) createRemoteCluster(secretKey types.NamespacedName, kubeCon
 		ID:                       cluster.ID(clusterID),
 		Client:                   clients,
 		SourceSecret:             secretKey,
+		systemNamespace:          c.namespace,
+		meshConfigMapName:        c.meshConfigMapName,
 		stop:                     make(chan struct{}),
 		initialSync:              atomic.NewBool(false),
 		initialSyncTimeout:       atomic.NewBool(false),
