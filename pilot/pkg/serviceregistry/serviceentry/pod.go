@@ -15,6 +15,8 @@
 package serviceentry
 
 import (
+	"fmt"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -27,10 +29,79 @@ import (
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	kubeUtil "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/krt"
+	"istio.io/istio/pkg/kube/multicluster"
 	pm "istio.io/istio/pkg/model"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
 )
+
+// buildPodWorkloads derives every cluster's Pods into the WorkloadInstances a ServiceEntry's
+// workloadSelector can select: the config cluster's Pods plus every remote cluster's, each read
+// straight from that cluster's informers rather than pushed in by the Kubernetes registry that owns
+// it. A remote cluster's collections come and go with the cluster, so they are held in a nested
+// collection and flattened here.
+//
+// Returns nil when Pods are not a workload source at all, so that no collection is built for them.
+func (s *Controller) buildPodWorkloads() krt.Collection[*model.WorkloadInstance] {
+	if !s.flags.EnableServiceEntrySelectPods {
+		return nil
+	}
+	localPodWorkloads := s.clusterPodWorkloads(s.multiclusterController.ConfigCluster(), s.opts)
+	globalPodWorkloads := multicluster.NestedCollectionFromLocalAndRemote(
+		s.multiclusterController,
+		localPodWorkloads,
+		func(ctx krt.HandlerContext, c *multicluster.Cluster) *krt.Collection[*model.WorkloadInstance] {
+			// The cluster's own stop channel, so that its collections are torn down with it.
+			return ptr.Of(s.clusterPodWorkloads(c, krt.NewOptionsBuilder(c.GetStop(), krtPrefix, s.krtDebugger)))
+		},
+		"PodWorkloadInstances",
+		s.opts,
+	)
+	return krt.NestedJoinWithMergeCollection(
+		globalPodWorkloads,
+		mergePodWorkloads,
+		s.opts.WithName("outputs/PodWorkloadInstances")...,
+	)
+}
+
+// clusterPodWorkloads derives one cluster's Pods. Only pods that cannot be an endpoint at all are
+// dropped; a pod that is not ready, or is terminating, is kept and reported unhealthy so that it can
+// drain rather than disappear. EDS filters unhealthy endpoints out unless the service asks for them.
+func (s *Controller) clusterPodWorkloads(c *multicluster.Cluster, opts krt.OptionsBuilder) krt.Collection[*model.WorkloadInstance] {
+	// A pod's network is resolved against its own cluster: the topology label on that cluster's system
+	// namespace, and the network whose fromRegistry entry names that cluster.
+	meshNetworkInfo := meshnetworks.NewClusterSingleton(c.Namespaces(), s.meshNetworksWatcher, s.systemNamespace, c.ID, opts)
+	nodes := c.Nodes()
+	// The mesh config is the config cluster's, including for a remote cluster's pods, so their
+	// ServiceAccount SAN is built with the local trust domain. The Kubernetes registry instead reads
+	// each cluster's own meshconfig (Options.MeshWatcher) for this, which differs only in a mesh whose
+	// clusters disagree on trustDomain.
+	return krt.NewCollection(c.Pods(), func(ctx krt.HandlerContext, pod *v1.Pod) **model.WorkloadInstance {
+		// A pod that has completed, or that has no address, can never be an endpoint. Note this is
+		// distinct from a terminating pod (deletionTimestamp set), which is kept and reported unhealthy.
+		if kubeUtil.CheckPodTerminal(pod) || (len(pod.Status.PodIP) == 0 && len(pod.Status.PodIPs) == 0) {
+			return nil
+		}
+		wi := convertPodToWorkloadInstance(ctx, pod, nodes, s.inputs.MeshConfig, meshNetworkInfo, c.ID, s.flags)
+		return &wi
+	}, append(
+		opts.WithName(fmt.Sprintf("outputs/PodWorkloadInstances[%s]", c.ID)),
+		krt.WithMetadata(krt.Metadata{multicluster.ClusterKRTMetadataKey: c.ID}),
+	)...)
+}
+
+// mergePodWorkloads resolves a workload that appears in more than one of the joined per-cluster
+// collections. A WorkloadInstance is keyed by cluster, so this only happens while a cluster's
+// credentials are rotating and both generations of its collections are briefly present; either
+// describes the same pod, so take the first.
+func mergePodWorkloads(instances []*model.WorkloadInstance) **model.WorkloadInstance {
+	for i := range instances {
+		if instances[i] != nil {
+			return &instances[i]
+		}
+	}
+	return nil
+}
 
 // convertPodToWorkloadInstance converts a Pod into the WorkloadInstance a ServiceEntry's
 // workloadSelector can select.

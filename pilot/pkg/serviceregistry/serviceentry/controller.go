@@ -22,7 +22,6 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry"
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
-	"istio.io/istio/pilot/pkg/serviceregistry/util/meshnetworks"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
@@ -31,7 +30,6 @@ import (
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/config/schema/kind"
-	kubeUtil "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
@@ -40,6 +38,10 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 )
+
+// krtPrefix names this registry's krt collections in the debug output. Per-cluster collections use
+// it too, so they need it independently of s.opts.
+const krtPrefix = "serviceentry"
 
 var (
 	_   serviceregistry.Instance = &Controller{}
@@ -53,7 +55,7 @@ type networkIDCallback func(endpointIP string, labels labels.Instance) network.I
 // process-wide features package happens to hold when a collection recomputes.
 type FeatureFlags struct {
 	// EnableServiceEntrySelectPods allows a ServiceEntry's workloadSelector to select Pods. When off,
-	// the config cluster's Pods are not a workload source for this registry at all.
+	// no cluster's Pods are a workload source for this registry at all.
 	EnableServiceEntrySelectPods bool
 	// EnableAlphaGatewayAPI makes XBackend an additional source of ServiceEntries.
 	EnableAlphaGatewayAPI bool
@@ -80,8 +82,8 @@ type Controller struct {
 	store     model.ConfigStore
 	clusterID cluster.ID
 
-	// systemNamespace is the namespace whose topology.istio.io/network label provides the default
-	// network for this cluster's workloads.
+	// systemNamespace is the namespace, in every cluster, whose topology.istio.io/network label
+	// provides the default network for that cluster's workloads.
 	systemNamespace     string
 	meshNetworksWatcher meshwatcher.NetworksWatcherCollection
 
@@ -113,14 +115,11 @@ type Inputs struct {
 	Namespaces      krt.Collection[*v1.Namespace]
 	WorkloadEntries krt.Collection[config.Config]
 	ServiceEntries  krt.Collection[config.Config]
-	// TODO: this should be a joined collection with multi cluster workloads
+	// ExternalWorkloads are the workloads other registries push in through
+	// WorkloadInstanceHandler: WorkloadEntries owned by a remote cluster's registry. Pods are not
+	// among them, in any cluster; this registry derives those itself.
 	ExternalWorkloads krt.StaticCollection[*model.WorkloadInstance]
 	XBackends         krt.Collection[config.Config]
-	// Pods, Nodes and MeshNetworkInfo are the config cluster's; they are unset on the WorkloadEntry
-	// controller and when PILOT_ENABLE_SERVICEENTRY_SELECT_PODS is off.
-	Pods            krt.Collection[*v1.Pod]
-	Nodes           krt.Collection[*v1.Node]
-	MeshNetworkInfo krt.Singleton[meshnetworks.MeshNetworkInfo]
 }
 
 type Outputs struct {
@@ -148,8 +147,8 @@ type Outputs struct {
 	// - XDS ProxyUpdates for workload instance updates.
 	Workloads krt.Collection[*model.WorkloadInstance]
 	// AllWorkloads is every workload a ServiceEntry can select, from any source. Unlike Workloads it is
-	// not notified to workload handlers: the config cluster's Pods are the Kubernetes registry's own,
-	// and remote workloads arrive from the registry that owns them.
+	// not notified to workload handlers: Pods belong to the Kubernetes registry of the cluster they run
+	// in, and remote WorkloadEntries to the registry that owns them.
 	AllWorkloads krt.Collection[*model.WorkloadInstance]
 }
 
@@ -208,7 +207,7 @@ func WithNetworkIDCb(cb func(endpointIP string, labels labels.Instance) network.
 }
 
 // WithSystemNamespace sets the namespace whose topology.istio.io/network label is the default
-// network for this cluster.
+// network for a cluster's workloads. The same namespace name is read in every cluster.
 func WithSystemNamespace(namespace string) Option {
 	return func(o *Controller) {
 		o.systemNamespace = namespace
@@ -278,7 +277,7 @@ func newController(
 		s.domainSuffix = constants.DefaultClusterLocalDomain
 	}
 
-	s.opts = krt.NewOptionsBuilder(stop, "serviceentry", s.krtDebugger)
+	s.opts = krt.NewOptionsBuilder(stop, krtPrefix, s.krtDebugger)
 	s.inputs = Inputs{
 		WorkloadEntries: store.KrtCollection(gvk.WorkloadEntry),
 		MeshConfig:      meshConfig.AsCollection(),
@@ -289,19 +288,6 @@ func newController(
 		s.inputs.Namespaces = configCluster.Namespaces()
 		s.inputs.ServiceEntries = store.KrtCollection(gvk.ServiceEntry)
 		s.inputs.ExternalWorkloads = krt.NewMutableCollection[*model.WorkloadInstance](nil, nil, s.opts.WithName("inputs/ExternalWorkloads")...)
-		if s.flags.EnableServiceEntrySelectPods {
-			// Pods of the config cluster are derived here rather than pushed in through
-			// WorkloadInstanceHandler; remote clusters still arrive through ExternalWorkloads.
-			s.inputs.Pods = configCluster.Pods()
-			s.inputs.Nodes = configCluster.Nodes()
-			s.inputs.MeshNetworkInfo = meshnetworks.LocalMeshNetworkInfo(
-				s.inputs.Namespaces,
-				s.meshNetworksWatcher,
-				s.systemNamespace,
-				s.clusterID,
-				s.opts,
-			)
-		}
 		if s.flags.EnableAlphaGatewayAPI {
 			s.inputs.XBackends = store.KrtCollection(gvk.XBackend)
 		}
@@ -389,27 +375,6 @@ func (s *Controller) buildCollections() {
 	}
 
 	s.outputs.Workloads = wleWorkloads
-}
-
-// buildPodWorkloads derives the config cluster's Pods into the WorkloadInstances a ServiceEntry's
-// workloadSelector can select. Only pods that cannot be an endpoint at all are dropped; a pod that is
-// not ready, or is terminating, is kept and reported unhealthy so that it can drain rather than
-// disappear. EDS filters unhealthy endpoints out unless the service asks for them.
-//
-// Returns nil when Pods are not a workload source at all, so that no collection is built for them.
-func (s *Controller) buildPodWorkloads() krt.Collection[*model.WorkloadInstance] {
-	if s.inputs.Pods == nil {
-		return nil
-	}
-	return krt.NewCollection(s.inputs.Pods, func(ctx krt.HandlerContext, pod *v1.Pod) **model.WorkloadInstance {
-		// A pod that has completed, or that has no address, can never be an endpoint. Note this is
-		// distinct from a terminating pod (deletionTimestamp set), which is kept and reported unhealthy.
-		if kubeUtil.CheckPodTerminal(pod) || (len(pod.Status.PodIP) == 0 && len(pod.Status.PodIPs) == 0) {
-			return nil
-		}
-		wi := convertPodToWorkloadInstance(ctx, pod, s.inputs.Nodes, s.inputs.MeshConfig, s.inputs.MeshNetworkInfo, s.clusterID, s.flags)
-		return &wi
-	}, s.opts.WithName("outputs/WorkloadsFromPods")...)
 }
 
 func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[InstancesByNamespaceHost]) {

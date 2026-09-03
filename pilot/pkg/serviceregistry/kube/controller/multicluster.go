@@ -232,12 +232,8 @@ func (m *Multicluster) initializeCluster(cluster *multicluster.Cluster, kubeCont
 ) {
 	client := cluster.Client
 
-	if m.serviceEntryController != nil && features.EnableServiceEntrySelectPods && !configCluster {
-		// Add an instance handler in the kubernetes registry to notify service entry store about pod events.
-		// The config cluster is excluded: the ServiceEntry controller derives those Pods itself from the
-		// config cluster's krt collection.
-		kubeRegistry.AppendWorkloadHandler(m.serviceEntryController.WorkloadInstanceHandler)
-	}
+	// Note there is no kube -> ServiceEntry workload handler for Pods, in any cluster: the
+	// ServiceEntry registry derives every cluster's Pods from that cluster's own krt collections.
 
 	// TODO implement deduping in aggregate registry to allow multiple k8s registries to handle WorkloadEntry
 	if features.EnableK8SServiceSelectWorkloadEntries {
