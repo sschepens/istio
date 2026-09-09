@@ -22,6 +22,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/google/go-cmp/cmp"
 	fuzz "github.com/google/gofuzz"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/util/protoconv"
@@ -336,6 +337,16 @@ func TestServicesEqual(t *testing.T) {
 			},
 			shouldEq: true,
 			name:     "matching ports",
+		},
+		{
+			first: &Service{
+				Ports: PortList{{Name: "http", Port: 80, Protocol: "HTTP", TargetPort: intstr.FromInt32(8080)}},
+			},
+			other: &Service{
+				Ports: PortList{{Name: "http", Port: 80, Protocol: "HTTP", TargetPort: intstr.FromInt32(8081)}},
+			},
+			shouldEq: false,
+			name:     "different target ports",
 		},
 		{
 			first: &Service{

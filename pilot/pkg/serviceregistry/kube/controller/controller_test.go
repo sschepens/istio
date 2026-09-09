@@ -2786,8 +2786,6 @@ func TestServiceUpdateNeedsPush(t *testing.T) {
 
 	type testcase struct {
 		name     string
-		prev     *corev1.Service
-		curr     *corev1.Service
 		prevConv *model.Service
 		currConv *model.Service
 		expect   bool
@@ -2861,39 +2859,31 @@ func TestServiceUpdateNeedsPush(t *testing.T) {
 	tests = append(tests,
 		testcase{
 			name:     "target ports changed",
-			prev:     &svc,
-			curr:     &updatedSvc,
 			prevConv: kube.ConvertService(svc, nil, constants.DefaultClusterLocalDomain, "", ""),
 			currConv: kube.ConvertService(updatedSvc, nil, constants.DefaultClusterLocalDomain, "", ""),
 			expect:   true,
 		},
 		testcase{
 			name:     "target ports unchanged",
-			prev:     &svc,
-			curr:     &svc,
 			prevConv: kube.ConvertService(svc, nil, constants.DefaultClusterLocalDomain, "", ""),
 			currConv: kube.ConvertService(svc, nil, constants.DefaultClusterLocalDomain, "", ""),
 			expect:   false,
 		},
 		testcase{
 			name:     "node ports changed",
-			prev:     &nodePortSvc,
-			curr:     &updatedNodePortSvc,
 			prevConv: kube.ConvertService(nodePortSvc, nil, constants.DefaultClusterLocalDomain, "cluster-1", ""),
 			currConv: kube.ConvertService(updatedNodePortSvc, nil, constants.DefaultClusterLocalDomain, "cluster-1", ""),
 			expect:   true,
 		},
 		testcase{
 			name:     "node ports unchanged",
-			prev:     &nodePortSvc,
-			curr:     &nodePortSvc,
 			prevConv: kube.ConvertService(nodePortSvc, nil, constants.DefaultClusterLocalDomain, "cluster-1", ""),
 			currConv: kube.ConvertService(nodePortSvc, nil, constants.DefaultClusterLocalDomain, "cluster-1", ""),
 			expect:   false,
 		})
 
 	for _, test := range tests {
-		actual := serviceUpdateNeedsPush(test.prev, test.curr, test.prevConv, test.currConv)
+		actual := serviceUpdateNeedsPush(test.prevConv, test.currConv)
 		if actual != test.expect {
 			t.Fatalf("%s: expected %v, got %v", test.name, test.expect, actual)
 		}

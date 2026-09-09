@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"istio.io/api/annotation"
 	"istio.io/api/label"
@@ -288,10 +289,16 @@ type Port struct {
 
 	// Protocol to be used for the port.
 	Protocol protocol.Instance `json:"protocol,omitempty"`
+
+	// TargetPort is the port that the workload is listening on. It may be a
+	// numeric value or a name that resolves per instance (Kubernetes named
+	// targetPort). For ServiceEntry it is always numeric. The zero value means
+	// unset.
+	TargetPort intstr.IntOrString `json:"targetPort,omitempty"`
 }
 
 func (p Port) String() string {
-	return fmt.Sprintf("Name:%s Port:%d Protocol:%v", p.Name, p.Port, p.Protocol)
+	return fmt.Sprintf("Name:%s Port:%d Protocol:%v TargetPort:%s", p.Name, p.Port, p.Protocol, p.TargetPort.String())
 }
 
 // PortList is a set of ports
@@ -1852,7 +1859,7 @@ func (ports PortList) GetByPort(num int) (*Port, bool) {
 }
 
 func (p *Port) Equals(other *Port) bool {
-	return p.Name == other.Name && p.Port == other.Port && p.Protocol == other.Protocol
+	return p.Name == other.Name && p.Port == other.Port && p.Protocol == other.Protocol && p.TargetPort == other.TargetPort
 }
 
 func (ports PortList) Equals(other PortList) bool {
@@ -2118,9 +2125,10 @@ func (s *Service) DeepCopy() *Service {
 		for i, port := range s.Ports {
 			if port != nil {
 				out.Ports[i] = &Port{
-					Name:     port.Name,
-					Port:     port.Port,
-					Protocol: port.Protocol,
+					Name:       port.Name,
+					Port:       port.Port,
+					Protocol:   port.Protocol,
+					TargetPort: port.TargetPort,
 				}
 			} else {
 				out.Ports[i] = nil

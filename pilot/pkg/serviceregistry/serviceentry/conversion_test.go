@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/features"
@@ -682,9 +684,10 @@ func makeTarget(cfg *config.Config, address string, port int,
 		Service: svc,
 		Port: model.ServiceInstancePort{
 			ServicePort: &model.Port{
-				Name:     svcPort.Name,
-				Port:     int(svcPort.Number),
-				Protocol: protocol.Parse(svcPort.Protocol),
+				Name:       svcPort.Name,
+				Port:       int(svcPort.Number),
+				Protocol:   protocol.Parse(svcPort.Protocol),
+				TargetPort: intstr.FromInt32(int32(svcPort.TargetPort)),
 			},
 			TargetPort: uint32(port),
 		},
@@ -735,9 +738,10 @@ func makeInstance(cfg *config.Config, workloadName string, addresses []string, p
 			WorkloadName:         workloadName,
 		},
 		ServicePort: &model.Port{
-			Name:     svcPort.Name,
-			Port:     int(svcPort.Number),
-			Protocol: protocol.Parse(svcPort.Protocol),
+			Name:       svcPort.Name,
+			Port:       int(svcPort.Number),
+			Protocol:   protocol.Parse(svcPort.Protocol),
+			TargetPort: intstr.FromInt32(int32(svcPort.TargetPort)),
 		},
 	}
 }
@@ -807,8 +811,12 @@ func testConvertServiceBody(t *testing.T, canonicalServiceForMeshExternal bool) 
 			// service entry dns with target port
 			externalSvc: dnsTargetPort,
 			services: []*model.Service{
-				makeService("google.com", "dnsTargetPort", "dnsTargetPort", []string{constants.UnspecifiedIP}, "", "",
-					map[string]int{"http-port": 80}, true, model.DNSLB),
+				func() *model.Service {
+					s := makeService("google.com", "dnsTargetPort", "dnsTargetPort", []string{constants.UnspecifiedIP}, "", "",
+						map[string]int{"http-port": 80}, true, model.DNSLB)
+					s.Ports[0].TargetPort = intstr.FromInt32(8080)
+					return s
+				}(),
 			},
 		},
 		{
@@ -1136,7 +1144,7 @@ func TestConvertWorkloadEntryToServiceInstances(t *testing.T) {
 			)
 			instances := make([]*WorkloadServiceInstance, 0, len(services))
 			for _, service := range services {
-				instances = append(instances, convertWorkloadInstanceToInstances(wli, service, tt.se.Spec.(*networking.ServiceEntry).Ports)...)
+				instances = append(instances, convertWorkloadInstanceToInstances(wli, service)...)
 			}
 			sortServiceInstances(instances)
 			sortServiceInstances(tt.out)
