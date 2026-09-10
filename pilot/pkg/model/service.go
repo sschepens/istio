@@ -141,6 +141,10 @@ func (s *Service) NamespacedName() types.NamespacedName {
 	return types.NamespacedName{Name: s.Attributes.Name, Namespace: s.Attributes.Namespace}
 }
 
+func (s *Service) GetLabelSelector() map[string]string {
+	return s.Attributes.LabelSelectors
+}
+
 func (s *Service) ResourceName() string {
 	// address and hostname are included in the resource name as for each
 	// ServiceEntry address and hostname a new service is created
@@ -404,9 +408,10 @@ func (instance *ServiceInstance) DeepCopy() *ServiceInstance {
 		Service:  instance.Service.DeepCopy(),
 		Endpoint: instance.Endpoint.DeepCopy(),
 		ServicePort: &Port{
-			Name:     instance.ServicePort.Name,
-			Port:     instance.ServicePort.Port,
-			Protocol: instance.ServicePort.Protocol,
+			Name:       instance.ServicePort.Name,
+			Port:       instance.ServicePort.Port,
+			Protocol:   instance.ServicePort.Protocol,
+			TargetPort: instance.ServicePort.TargetPort,
 		},
 	}
 }

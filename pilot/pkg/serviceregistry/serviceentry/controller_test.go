@@ -626,6 +626,41 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 // Tests that when multiple service entries with "DNSRounbRobinLB" resolution type
 // are created with different/same endpoints, we only consider the first service because
 // Envoy's LogicalDNS type of cluster does not allow more than one locality LB Endpoint.
+func TestMergeServiceInstancesDeterministic(t *testing.T) {
+	cfg := selector.DeepCopy()
+	cfg.Spec.(*networking.ServiceEntry).Addresses = []string{"10.0.0.1", "10.0.0.2"}
+	workload := &model.WorkloadInstance{
+		Namespace: "selector",
+		Name:      "wl",
+		Endpoint:  &model.IstioEndpoint{Addresses: []string{"2.2.2.2"}},
+	}
+	var instances []*WorkloadServiceInstance
+	for _, service := range convertServices(cfg, nil, false) {
+		instances = append(instances, convertWorkloadInstanceToInstances(workload, service)...)
+	}
+	want := []string{
+		"selector/wl/2.2.2.2/http-445",
+		"selector/wl/2.2.2.2/tcp-444",
+		"selector/wl/2.2.2.2/http-445",
+		"selector/wl/2.2.2.2/tcp-444",
+	}
+	assert.Equal(t, len(instances), len(want))
+	// The index can return ports and service address variants in any order.
+	for offset := range len(instances) {
+		for _, reverse := range []bool{false, true} {
+			input := append(slices.Clone(instances[offset:]), instances[:offset]...)
+			if reverse {
+				slices.Reverse(input)
+			}
+			merged, dns := mergeServiceInstances(input)
+			assert.Equal(t, dns, false)
+			assert.Equal(t, slices.Map(merged, func(i *model.IstioEndpoint) string {
+				return i.Key()
+			}), want)
+		}
+	}
+}
+
 func TestServiceDiscoveryServiceInstancesForDnsRoundRobinLB(t *testing.T) {
 	store, sd, events := initServiceDiscovery(t)
 
@@ -785,7 +820,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com"})
 	})
 
@@ -882,7 +916,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		expectServiceInstances(t, sd, dnsSelector, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
-			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
 			Event{Type: "xds", ID: "dns.selector.com"})
 	})
 
@@ -1026,7 +1059,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		deleteConfigs([]*config.Config{selector}, store, t)
 		expectEvents(
 			t, events,
-			Event{Type: "eds", ID: "selector.com"},
 			Event{Type: "service", ID: "selector.com"},
 			Event{Type: "xds", ID: "selector.com"},
 		)
@@ -1039,7 +1071,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		deleteConfigs([]*config.Config{dnsSelector}, store, t)
 		expectEvents(
 			t, events,
-			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
 			Event{Type: "service", ID: "dns.selector.com"},
 			Event{Type: "xds", ID: "dns.selector.com"},
 		)
@@ -1093,7 +1124,6 @@ func TestServiceDiscoveryWorkloadChangeLabel(t *testing.T) {
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com"})
 	})
 
@@ -1120,7 +1150,8 @@ func TestServiceDiscoveryWorkloadChangeLabel(t *testing.T) {
 		instances = []*WorkloadServiceInstance{}
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectProxyInstances(t, sd, instances, []string{"2.2.2.2"})
-		expectEvents(t, events,
+		expectEvents(
+			t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace, EndpointCount: 0},
 			// The WorkloadEntry still exists (relabeled), so it no longer matches selector.com -
 			// push its own proxy so it drops the stale ServiceTarget.
@@ -1172,7 +1203,8 @@ func TestServiceDiscoveryWorkloadChangeLabel(t *testing.T) {
 		}
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectProxyInstances(t, sd, instances, []string{"3.3.3.3"})
-		expectEvents(t, events,
+		expectEvents(
+			t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace, EndpointCount: 2},
 			// The WorkloadEntry still exists (relabeled), so it no longer matches selector.com -
 			// push its own proxy so it drops the stale ServiceTarget.
@@ -1233,7 +1265,6 @@ func TestWorkloadInstanceFullPush(t *testing.T) {
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selectorDNS.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace},
 			Event{Type: "xds", ID: "selector.com"})
 	})
 
@@ -1403,7 +1434,6 @@ func TestServiceDiscoveryWorkloadInstance(t *testing.T) {
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com"})
 	})
 
@@ -1414,7 +1444,6 @@ func TestServiceDiscoveryWorkloadInstance(t *testing.T) {
 		expectServiceInstances(t, sd, dnsSelector, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
-			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
 			Event{Type: "xds", ID: "dns.selector.com"})
 	})
 
@@ -1595,7 +1624,6 @@ func TestServiceDiscoveryWorkloadInstanceChangeLabel(t *testing.T) {
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds"})
 	})
 
@@ -1785,7 +1813,6 @@ func TestPodEndpointForcesOwnProxyPush(t *testing.T) {
 	createConfigs([]*config.Config{selector}, store, t)
 	expectEvents(t, events,
 		Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-		Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 		Event{Type: "xds", ID: "selector.com"})
 
 	pod := &model.WorkloadInstance{
@@ -1833,7 +1860,6 @@ func TestWorkloadEntryEndpointPushesProxyOnce(t *testing.T) {
 	createConfigs([]*config.Config{selector}, store, t)
 	expectEvents(t, events,
 		Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-		Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 		Event{Type: "xds", ID: "selector.com"})
 
 	// Same shape as a pod-derived instance, but explicitly a WorkloadEntry.
@@ -1876,7 +1902,6 @@ func TestServiceEntrySelectorChangeForcesProxyPush(t *testing.T) {
 	createConfigs([]*config.Config{selector}, store, t)
 	expectEvents(t, events,
 		Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-		Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 		Event{Type: "xds", ID: "selector.com"})
 
 	wle := createWorkloadEntry("wl", selector.Name,
@@ -1930,7 +1955,6 @@ func TestWorkloadRemovalSkipsOwnProxyPush(t *testing.T) {
 		createConfigs([]*config.Config{selector}, store, t)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com"})
 
 		wle := createWorkloadEntry("wl", selector.Name,
@@ -1956,7 +1980,6 @@ func TestWorkloadRemovalSkipsOwnProxyPush(t *testing.T) {
 		createConfigs([]*config.Config{selector}, store, t)
 		expectEvents(t, events,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com"})
 
 		pod := &model.WorkloadInstance{

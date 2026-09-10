@@ -15,7 +15,6 @@
 package serviceentry
 
 import (
-	"strconv"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -54,8 +53,8 @@ type Controller struct {
 
 	multiclusterController *multicluster.Controller
 
-	store     model.ConfigStore
 	clusterID cluster.ID
+	shard     model.ShardKey
 
 	domainSuffix string
 
@@ -91,28 +90,31 @@ type Inputs struct {
 }
 
 type Outputs struct {
-	// Services is a collection of unique services with their corresponding instances,
-	// these instances include ServiceEntry inlined WorkloadEntries as well as selected
-	// instances based on WorkloadSelector.
+	// Services is a collection of unique services derived from ServiceEntries.
 	// Use cases:
 	// - source of truth for controller services.
+	// - lookup of a service by hostname
+	Services       krt.Collection[*model.Service]
+	ServicesByHost krt.Index[string, *model.Service]
+	// ServicesByNamespaceHost is an index collection of services keyed by namespace+hostname.
+	// Use cases:
 	// - XDS ConfigUpdates for service updates.
-	Services       krt.Collection[ServiceWithInstances]
-	ServicesByHost krt.Index[string, ServiceWithInstances]
-	// ServiceInstancesByNamespaceHost is a collection of service instances keyed by namespace and hostname.
+	// - recognize full service deletions.
+	ServicesByNamespaceHost krt.IndexCollection[string, *model.Service]
+	// ServiceInstancesByNamespaceHost is a collection of instances keyed by namespace and hostname.
 	// Use cases:
 	// - as an input to EDS Updates
-	// - recognize full service deletions which currently require special handling.
 	// - to force an XDS ConfigUpdate when a DNS service endpoint is modified.
-	ServiceInstancesByNamespaceHost krt.Collection[InstancesByNamespaceHost]
+	ServiceInstancesByNamespaceHost krt.Collection[*EDSInstances]
 	// ServiceInstances is a collection of all service instances.
-	// Its main purpose is to allow searching for service instances by IP.
+	// Use cases:
+	// - Finding service instances by IP.
+	// - XDS ProxyUpdate for service instance changes.
 	ServiceInstances     krt.Collection[*WorkloadServiceInstance]
 	ServiceInstancesByIP krt.Index[string, *WorkloadServiceInstance]
 	// Workloads is a collection of local workload instances.
 	// Use cases:
 	// - Notifying workload instance handlers.
-	// - XDS ProxyUpdates for workload instance updates.
 	Workloads krt.Collection[*model.WorkloadInstance]
 }
 
@@ -128,30 +130,12 @@ func (swi ServiceWithInstances) ResourceName() string {
 func (swi ServiceWithInstances) Equals(other ServiceWithInstances) bool {
 	return swi.Service.Equals(other.Service) &&
 		slices.EqualFunc(swi.Instances, other.Instances, func(a, b *WorkloadServiceInstance) bool {
-			return a.Endpoint.Equals(b.Endpoint)
-		})
-}
-
-type InstancesByNamespaceHost struct {
-	Namespace             string
-	Hostname              string
-	Instances             []*WorkloadServiceInstance
-	HasDNSServiceEndpoint bool
-}
-
-func (s InstancesByNamespaceHost) ResourceName() string {
-	return s.Namespace + "/" + s.Hostname
-}
-
-func (s InstancesByNamespaceHost) Equals(other InstancesByNamespaceHost) bool {
-	return s.Namespace == other.Namespace && s.Hostname == other.Hostname &&
-		s.HasDNSServiceEndpoint == other.HasDNSServiceEndpoint &&
-		slices.EqualFunc(s.Instances, other.Instances, func(a, b *WorkloadServiceInstance) bool {
 			return a.Equals(b)
 		})
 }
 
 type WorkloadServiceInstance struct {
+	UID         string
 	Namespace   string
 	Name        string
 	Service     *model.Service       `json:"service,omitempty"`
@@ -160,15 +144,40 @@ type WorkloadServiceInstance struct {
 }
 
 func (wsi *WorkloadServiceInstance) ResourceName() string {
-	return wsi.Namespace + "/" + wsi.Name + "/" + wsi.Service.ResourceName() + "/" + wsi.Endpoint.Key() + "/" + strconv.Itoa(wsi.ServicePort.Port)
+	return wsi.UID
 }
 
 func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool {
-	return wsi.Namespace == other.Namespace &&
-		wsi.Name == other.Name &&
+	// Equality is determined by the UID, ServicePort, Endpoint, and Service. Namespace and Name
+	// are already included in the UID.
+	return wsi.UID == other.UID &&
 		wsi.ServicePort.Equals(other.ServicePort) &&
 		wsi.Endpoint.Equals(other.Endpoint) &&
 		wsi.Service.Equals(other.Service)
+}
+
+type EDSInstances struct {
+	Namespace             string
+	Host                  string
+	Instances             []*model.IstioEndpoint
+	AnyDNSServiceEndpoint bool
+}
+
+func (e *EDSInstances) ResourceName() string {
+	return e.Namespace + "/" + e.Host
+}
+
+func (e *EDSInstances) Equals(other *EDSInstances) bool {
+	if e.Namespace != other.Namespace || e.Host != other.Host {
+		return false
+	}
+	if e.AnyDNSServiceEndpoint != other.AnyDNSServiceEndpoint {
+		return false
+	}
+
+	return slices.EqualFunc(e.Instances, other.Instances, func(a, b *model.IstioEndpoint) bool {
+		return a.Equals(b)
+	})
 }
 
 type Option func(*Controller)
@@ -230,7 +239,6 @@ func newController(
 		workloadEntryController:         workloadEntryController,
 		multiclusterController:          multiclusterController,
 		XdsUpdater:                      xdsUpdater,
-		store:                           store,
 		stop:                            stop,
 		canonicalServiceForMeshExternal: features.CanonicalServiceForMeshExternalServiceEntry,
 	}
@@ -240,6 +248,7 @@ func newController(
 	if s.domainSuffix == "" {
 		s.domainSuffix = constants.DefaultClusterLocalDomain
 	}
+	s.shard = model.ShardKeyFromRegistry(s)
 
 	s.opts = krt.NewOptionsBuilder(stop, "serviceentry", s.krtDebugger)
 	s.inputs = Inputs{
@@ -287,90 +296,138 @@ func (s *Controller) buildCollections() {
 	}, s.opts.WithName("outputs/WorkloadsFromWLE")...)
 
 	if !s.workloadEntryController {
-		allWorkloads := krt.JoinCollection(
-			[]krt.Collection[*model.WorkloadInstance]{wleWorkloads, s.inputs.ExternalWorkloads.AsCollection()},
-			s.opts.WithName("outputs/AllWorkloads")...,
-		)
-		workloadsByNamespace := krt.NewNamespaceIndex(allWorkloads)
-
 		backendServiceEntries := krt.NewCollection(s.inputs.XBackends, backendToServiceEntry(s.domainSuffix), s.opts.WithName("inputs/BackendServiceEntries")...)
 		combinedServiceEntries := krt.JoinCollection(
 			[]krt.Collection[config.Config]{s.inputs.ServiceEntries, backendServiceEntries},
 			s.opts.WithName("inputs/combinedServiceEntries")...,
 		)
 
-		services, servicesByNsHost, servicesByHost := services(
+		serviceEntryVisibility := model.ServiceEntryVisibilityCollection(s.inputs.MeshConfig, s.opts)
+
+		servicesWithInstances := services(
 			combinedServiceEntries,
+			serviceEntryVisibility,
 			s.inputs.MeshConfig,
 			s.inputs.Namespaces,
-			workloadsByNamespace,
 			s.clusterID,
 			s.networkIDCallback,
 			s.canonicalServiceForMeshExternal,
 			s.opts,
 		)
 
-		mergedServicesInstances := mergeServicesInstancesByNamespaceHost(servicesByNsHost.AsCollection(), s.opts)
+		allServices := krt.MapCollection(servicesWithInstances, func(swi ServiceWithInstances) *model.Service {
+			return swi.Service
+		}, s.opts.WithName("outputs/AllServices")...)
 
-		// derive service instances from merged services
-		serviceInstances := krt.NewManyCollection(mergedServicesInstances, func(ctx krt.HandlerContext, swi InstancesByNamespaceHost) []*WorkloadServiceInstance {
+		allWorkloads := krt.JoinCollection(
+			[]krt.Collection[*model.WorkloadInstance]{
+				wleWorkloads,
+				s.inputs.ExternalWorkloads.AsCollection(),
+			},
+			s.opts.WithName("outputs/AllWorkloads")...,
+		)
+
+		workloadServicesByNamespace := krt.NewIndex(allServices, "namespaceWithSelector", func(svc *model.Service) []string {
+			if len(svc.Attributes.LabelSelectors) == 0 {
+				return nil
+			}
+			return []string{svc.Attributes.Namespace}
+		})
+
+		servicesByHost := krt.NewIndex(allServices, "host", func(svc *model.Service) []string {
+			return []string{string(svc.Hostname)}
+		})
+		servicesByNamespaceHost := krt.NewIndex(allServices, "namespaceHost", func(svc *model.Service) []string {
+			return []string{svc.Attributes.Namespace + "/" + string(svc.Hostname)}
+		})
+
+		serviceEntryInstances := krt.NewManyCollection(servicesWithInstances, func(ctx krt.HandlerContext, swi ServiceWithInstances) []*WorkloadServiceInstance {
+			// services with a workload selector have nil instances, so we only collect inline service entry instances
 			return swi.Instances
-		}, s.opts.WithName("outputs/ServiceInstances")...)
+		}, s.opts.WithName("outputs/ServiceEntryInstances")...)
+		workloadServiceInstances := serviceInstances(allWorkloads, workloadServicesByNamespace, s.opts)
+		allInstances := krt.JoinCollection([]krt.Collection[*WorkloadServiceInstance]{
+			workloadServiceInstances,
+			serviceEntryInstances,
+		}, s.opts.WithName("outputs/AllInstances")...)
 
-		serviceInstancesByIP := krt.NewIndex(serviceInstances, "ip", func(si *WorkloadServiceInstance) []string {
+		instancesByIP := krt.NewIndex(allInstances, "ip", func(si *WorkloadServiceInstance) []string {
 			return []string{si.Endpoint.FirstAddressOrNil()}
 		})
 
+		instancesByNsHost := krt.NewIndex(allInstances, "namespaceHost", func(si *WorkloadServiceInstance) []string {
+			return []string{si.Service.Attributes.Namespace + "/" + string(si.Service.Hostname)}
+		}).AsCollection(s.opts.WithName("ServiceInstancesByNamespaceHost")...)
+
+		mergedInstancesByNamespaceHost := krt.NewManyCollection(
+			instancesByNsHost,
+			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) []*EDSInstances {
+				namespace, hostname, _ := strings.Cut(obj.Key, "/")
+				endpoints, anyDNSServiceEndpoint := mergeServiceInstances(obj.Objects)
+
+				return []*EDSInstances{{
+					Namespace:             namespace,
+					Host:                  hostname,
+					Instances:             endpoints,
+					AnyDNSServiceEndpoint: anyDNSServiceEndpoint,
+				}}
+			},
+			s.opts.WithName("outputs/MergedServiceInstancesByNamespaceHost")...,
+		)
+
 		s.outputs = Outputs{
-			Services:                        services,
+			Services:                        allServices,
 			ServicesByHost:                  servicesByHost,
-			ServiceInstancesByNamespaceHost: mergedServicesInstances,
-			ServiceInstances:                serviceInstances,
-			ServiceInstancesByIP:            serviceInstancesByIP,
+			ServicesByNamespaceHost:         servicesByNamespaceHost.AsCollection(s.opts.WithName("outputs/ServiceByNamespaceHost")...),
+			ServiceInstancesByNamespaceHost: mergedInstancesByNamespaceHost,
+			ServiceInstances:                allInstances,
+			ServiceInstancesByIP:            instancesByIP,
 		}
 	}
 
 	s.outputs.Workloads = wleWorkloads
 }
 
-func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[InstancesByNamespaceHost]) {
-	shard := model.ShardKeyFromRegistry(s)
-
+func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances]) {
 	for _, e := range events {
 		obj := e.Latest()
+
 		if e.Event == controllers.EventDelete {
-			// TODO: SvcUpdate should not be necessary here since EDSUpdate with no endpoints will already delete the service shard,
-			// it only increments the counter and does not request a push.
-			s.XdsUpdater.SvcUpdate(shard, obj.Hostname, obj.Namespace, model.EventDelete)
-			s.XdsUpdater.EDSUpdate(shard, obj.Hostname, obj.Namespace, nil)
+			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, nil)
 		} else {
-			instances := slices.Map(obj.Instances, func(i *WorkloadServiceInstance) *model.IstioEndpoint {
-				return i.Endpoint
-			})
-			s.XdsUpdater.EDSUpdate(shard, obj.Hostname, obj.Namespace, instances)
-			if obj.HasDNSServiceEndpoint && e.Event == controllers.EventUpdate {
-				s.XdsUpdater.ConfigUpdate(&model.PushRequest{
-					ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: obj.Hostname, Namespace: obj.Namespace}),
-					Reason:         model.NewReasonStats(model.EndpointUpdate),
-				})
+			// this handler operates independently from the service update mechanism,
+			// if this handler gets delayed, we could end up re-creating EDS Shards for non-existing services.
+			if s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) == nil {
+				continue
 			}
+			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, obj.Instances)
+		}
+		if obj.AnyDNSServiceEndpoint {
+			s.XdsUpdater.ConfigUpdate(&model.PushRequest{
+				ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: obj.Host, Namespace: obj.Namespace}),
+				Reason:         model.NewReasonStats(model.EndpointUpdate),
+			})
 		}
 	}
 }
 
-func (s *Controller) pushServiceUpdates(events []krt.Event[ServiceWithInstances]) {
+func (s *Controller) pushServiceUpdates(events []krt.Event[*model.Service]) {
 	configsUpdated := sets.New[model.ConfigKey]()
-	shard := model.ShardKeyFromRegistry(s)
 	for _, e := range events {
-		if e.Event == controllers.EventUpdate && e.New.Service.Equals(e.Old.Service) {
-			// only instances have changed
+		svc := e.Latest()
+		hostname, namespace := string(svc.Hostname), svc.Attributes.Namespace
+
+		configsUpdated.Insert(model.ConfigKey{
+			Kind:      kind.ServiceEntry,
+			Name:      hostname,
+			Namespace: namespace,
+		})
+		if e.Event == controllers.EventDelete && s.outputs.ServicesByNamespaceHost.GetKey(namespace+"/"+hostname) != nil {
+			// Several ServiceEntries can back the same hostname. SvcUpdate(EventDelete) tears down the
+			// host's endpoint shards, so only send it once the last of those services is gone.
 			continue
 		}
-		configsUpdated.Insert(makeConfigKey(e.Latest().Service))
-		if e.Event != controllers.EventDelete {
-			// full service deletions are not handled here
-			s.XdsUpdater.SvcUpdate(shard, string(e.Latest().Service.Hostname), e.Latest().Service.Attributes.Namespace, model.Event(e.Event))
-		}
+		s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.Event(e.Event))
 	}
 	if len(configsUpdated) > 0 {
 		s.XdsUpdater.ConfigUpdate(&model.PushRequest{
@@ -471,9 +528,7 @@ func (s *Controller) Services() []*model.Service {
 	}
 
 	allServices := s.outputs.Services.List()
-	return autoAllocateIPs(slices.Map(allServices, func(s ServiceWithInstances) *model.Service {
-		return s.Service
-	}))
+	return autoAllocateIPs(allServices)
 }
 
 // GetService retrieves a service by host name if it exists.
@@ -488,11 +543,11 @@ func (s *Controller) GetService(hostname host.Name) *model.Service {
 		return nil
 	}
 	if len(res) == 1 {
-		return res[0].Service
+		return res[0]
 	}
 
-	sortServicesByCreationTime(res)
-	return res[0].Service
+	slices.SortStableFunc(res, compareServices)
+	return res[0]
 }
 
 // ResyncEDS will do a full EDS update. This is needed for some tests where we have many configs loaded without calling
@@ -503,12 +558,8 @@ func (s *Controller) ResyncEDS() {
 		return
 	}
 
-	shard := model.ShardKeyFromRegistry(s)
 	for _, io := range s.outputs.ServiceInstancesByNamespaceHost.List() {
-		instances := slices.Map(io.Instances, func(i *WorkloadServiceInstance) *model.IstioEndpoint {
-			return i.Endpoint
-		})
-		s.XdsUpdater.EDSUpdate(shard, io.Hostname, io.Namespace, instances)
+		s.XdsUpdater.EDSUpdate(s.shard, io.Host, io.Namespace, io.Instances)
 	}
 }
 
@@ -582,6 +633,7 @@ func (s *Controller) HasSynced() bool {
 
 	if !s.workloadEntryController {
 		if !s.outputs.Services.HasSynced() ||
+			!s.outputs.ServicesByNamespaceHost.HasSynced() ||
 			!s.outputs.ServiceInstances.HasSynced() ||
 			!s.outputs.ServiceInstancesByNamespaceHost.HasSynced() {
 			return false
@@ -597,28 +649,48 @@ func (s *Controller) HasSynced() bool {
 	return true
 }
 
-// similar to model.SortServicesByCreationTime but for ServiceWithInstances and with a fallback
-// on Attributes.K8sAttributes.ObjectName to ensure determinism when we have multiple services
-// with the same hostname in the same namespace.
-func sortServicesByCreationTime(services []ServiceWithInstances) {
-	slices.SortStableFunc(services, func(i, j ServiceWithInstances) int {
-		if r := i.Service.CreationTime.Compare(j.Service.CreationTime); r != 0 {
+func compareServices(i, j *model.Service) int {
+	if r := i.CreationTime.Compare(j.CreationTime); r != 0 {
+		return r
+	}
+
+	// If creation time is the same, then behavior is nondeterministic. In this case, we can
+	// pick an arbitrary but consistent ordering based on name and namespace, which is unique.
+	// CreationTimestamp is stored in seconds, so this is not uncommon.
+	if r := strings.Compare(i.Attributes.Name, j.Attributes.Name); r != 0 {
+		return r
+	}
+
+	if r := strings.Compare(i.Attributes.Namespace, j.Attributes.Namespace); r != 0 {
+		return r
+	}
+
+	// Fallback on Attributes.K8sAttributes.ObjectName because Attributes.Name is actually the hostname
+	// and we can have multiple services with the same hostname in the same namespace.
+	return strings.Compare(i.Attributes.K8sAttributes.ObjectName, j.Attributes.K8sAttributes.ObjectName)
+}
+
+func mergeServiceInstances(instances []*WorkloadServiceInstance) ([]*model.IstioEndpoint, bool) {
+	anyDNSServiceEndpoint := false
+	ports := sets.New[int]()
+	slices.SortStableFunc(instances, func(a, b *WorkloadServiceInstance) int {
+		if r := compareServices(a.Service, b.Service); r != 0 {
 			return r
 		}
-
-		// If creation time is the same, then behavior is nondeterministic. In this case, we can
-		// pick an arbitrary but consistent ordering based on name and namespace, which is unique.
-		// CreationTimestamp is stored in seconds, so this is not uncommon.
-		if r := strings.Compare(i.Service.Attributes.Name, j.Service.Attributes.Name); r != 0 {
-			return r
-		}
-
-		if r := strings.Compare(i.Service.Attributes.Namespace, j.Service.Attributes.Namespace); r != 0 {
-			return r
-		}
-
-		// Fallback on Attributes.K8sAttributes.ObjectName because Attributes.Name is actually the hostname
-		// and we can have multiple services with the same hostname in the same namespace.
-		return strings.Compare(i.Service.Attributes.K8sAttributes.ObjectName, j.Service.Attributes.K8sAttributes.ObjectName)
+		return strings.Compare(a.UID, b.UID)
 	})
+	res := make([]*model.IstioEndpoint, 0, len(instances))
+	for _, w := range instances {
+		if w.Service.Resolution == model.DNSRoundRobinLB {
+			if ports.Contains(w.ServicePort.Port) {
+				continue
+			}
+		}
+		ports.Insert(w.ServicePort.Port)
+		if isDNSTypeService(w.Service) {
+			anyDNSServiceEndpoint = true
+		}
+		res = append(res, w.Endpoint)
+	}
+	return res, anyDNSServiceEndpoint
 }
