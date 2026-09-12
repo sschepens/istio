@@ -374,6 +374,9 @@ func convertServiceEntryToInstances(
 					},
 					Namespace:    cfg.Namespace,
 					WorkloadName: cfg.Name,
+					// This branch only runs for DNS services (see hostnameToServiceInstance above), where
+					// the endpoint is the service hostname itself.
+					DNSEndpoint: true,
 				},
 				Service:     service,
 				ServicePort: servicePort,
@@ -429,6 +432,7 @@ func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance
 		ep.LegacyClusterPortKey = servicePort.Port
 		ep.Addresses = addrs
 		ep.EndpointPort = targetPort
+		ep.DNSEndpoint = isDNSTypeService(service)
 		if ep.Namespace == "" {
 			ep.Namespace = workloadInstance.Namespace
 		}

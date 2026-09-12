@@ -609,6 +609,13 @@ type IstioEndpoint struct {
 	// object present.
 	SendUnhealthyEndpoints bool
 
+	// DNSEndpoint indicates this endpoint backs a service that resolves through DNS. Such endpoints are
+	// inlined into the cluster instead of being delivered over EDS, so changing them requires clusters to
+	// be regenerated rather than just an endpoint update.
+	// Note: like SendUnhealthyEndpoints, this is really a property of the service, but the push type is
+	// decided in EndpointIndex.UpdateServiceEndpoints, which has no service object to consult.
+	DNSEndpoint bool
+
 	// If in k8s, the node where the pod resides
 	NodeName string
 
@@ -2214,6 +2221,7 @@ func (ep *IstioEndpoint) Equals(other *IstioEndpoint) bool {
 		ep.SubDomain == other.SubDomain &&
 		ep.HealthStatus == other.HealthStatus &&
 		ep.SendUnhealthyEndpoints == other.SendUnhealthyEndpoints &&
+		ep.DNSEndpoint == other.DNSEndpoint &&
 		ep.NodeName == other.NodeName
 	if !eq {
 		return false

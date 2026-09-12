@@ -580,7 +580,6 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 		createConfigs([]*config.Config{tcpDNSUpdated}, store, t)
 		expectEvents(
 			t, events,
-			Event{Type: "xds", ID: "tcpdns.com"},
 			Event{Type: "eds", ID: "tcpdns.com"},
 		) // service deleted
 		expectServiceInstances(t, sd, tcpDNS, 0, instances2)
@@ -604,7 +603,7 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 			Event{Type: "service", ID: "selector1.com", Namespace: httpStaticOverlay.Namespace},
 			Event{Type: "service", ID: "*.google.com", Namespace: httpStaticOverlay.Namespace},
 			Event{Type: "eds", ID: "*.google.com", Namespace: httpStaticOverlay.Namespace},
-			Event{Type: "eds", ID: "selector1.com", Namespace: httpStaticOverlay.Namespace},
+			// selector1.com selects no workloads, so it has no endpoints and gets no EDS update.
 			Event{Type: "xds", ID: "*.google.com,selector1.com"}) // service added
 
 		selector1Updated := func() *config.Config {
@@ -652,8 +651,7 @@ func TestMergeServiceInstancesDeterministic(t *testing.T) {
 			if reverse {
 				slices.Reverse(input)
 			}
-			merged, dns := mergeServiceInstances(input)
-			assert.Equal(t, dns, false)
+			merged := mergeServiceInstances(input)
 			assert.Equal(t, slices.Map(merged, func(i *model.IstioEndpoint) string {
 				return i.Key()
 			}), want)
@@ -935,7 +933,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
-			Event{Type: "xds", ID: "dns.selector.com"},
 			// cannot void proxy update for dns workload
 			Event{Type: "proxy", ID: "4.4.4.4"},
 		)
@@ -1213,7 +1210,11 @@ func TestServiceDiscoveryWorkloadChangeLabel(t *testing.T) {
 	})
 }
 
-func TestWorkloadInstanceFullPush(t *testing.T) {
+// Workload instances fed in from other registries must produce endpoints for a DNS ServiceEntry,
+// flagged as DNS so that EndpointIndex.UpdateServiceEndpoints knows to regenerate the cluster rather
+// than pushing endpoints alone. The push itself is decided there and covered by its own tests; this
+// verifies the endpoints this controller hands over.
+func TestWorkloadInstanceDNSServiceEntry(t *testing.T) {
 	store, sd, events := initServiceDiscovery(t)
 
 	// Setup a WorkloadEntry with selector the same as ServiceEntry
@@ -1282,15 +1283,15 @@ func TestWorkloadInstanceFullPush(t *testing.T) {
 		}
 		expectProxyInstances(t, sd, instances, []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
+		expectDNSEndpoints(t, sd, selectorDNS)
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace},
-			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "postman-echo.com"},
 		)
 	})
 
-	t.Run("full push for new instance", func(t *testing.T) {
+	t.Run("new instance", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fi1}, sd, model.EventAdd, t)
 		instances := []*WorkloadServiceInstance{
 			makeInstanceWithServiceAccount(selectorDNS, "additional-name", []string{"4.4.4.4"}, 444,
@@ -1306,29 +1307,27 @@ func TestWorkloadInstanceFullPush(t *testing.T) {
 		expectProxyInstances(t, sd, instances[:2], []string{"4.4.4.4"})
 		expectProxyInstances(t, sd, instances[2:], []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
+		expectDNSEndpoints(t, sd, selectorDNS)
 		expectEvents(t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)},
-			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "4.4.4.4"})
 	})
 
-	t.Run("full push for another new workload instance", func(t *testing.T) {
+	t.Run("another new workload instance", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fi2}, sd, model.EventAdd, t)
 		expectEvents(t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: 6},
-			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "2.2.2.2"})
 	})
 
-	t.Run("full push for new instance with multiple addresses", func(t *testing.T) {
+	t.Run("new instance with multiple addresses", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fiwithmulAddrs}, sd, model.EventAdd, t)
 		expectEvents(t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: 8},
-			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "3.3.3.3"})
 	})
 
-	t.Run("full push on delete workload instance", func(t *testing.T) {
+	t.Run("delete workload instance", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fi1}, sd, model.EventDelete, t)
 		instances := []*WorkloadServiceInstance{
 			makeInstanceWithServiceAccount(selectorDNS, "another-name", []string{"2.2.2.2"}, 444,
@@ -1349,13 +1348,13 @@ func TestWorkloadInstanceFullPush(t *testing.T) {
 		expectProxyInstances(t, sd, instances[2:4], []string{"3.3.3.3", "2001:1::1"})
 		expectProxyInstances(t, sd, instances[4:], []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
+		expectDNSEndpoints(t, sd, selectorDNS)
 
 		expectEvents(t, events,
-			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)},
-			Event{Type: "xds", ID: "selector.com"})
+			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)})
 	})
 
-	t.Run("full push on delete workload instance with multiple addresses", func(t *testing.T) {
+	t.Run("delete workload instance with multiple addresses", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fiwithmulAddrs}, sd, model.EventDelete, t)
 		instances := []*WorkloadServiceInstance{
 			makeInstanceWithServiceAccount(selectorDNS, "another-name", []string{"2.2.2.2"}, 444,
@@ -1371,10 +1370,10 @@ func TestWorkloadInstanceFullPush(t *testing.T) {
 		expectProxyInstances(t, sd, instances[:2], []string{"2.2.2.2"})
 		expectProxyInstances(t, sd, instances[2:], []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
+		expectDNSEndpoints(t, sd, selectorDNS)
 
 		expectEvents(t, events,
-			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)},
-			Event{Type: "xds", ID: "selector.com"})
+			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)})
 	})
 }
 
@@ -1591,7 +1590,6 @@ func TestServiceDiscoveryWorkloadInstance(t *testing.T) {
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace, EndpointCount: 2},
-			Event{Type: "xds", ID: "dns.selector.com"},
 			Event{Type: "proxy", ID: "2.2.2.2"},
 		)
 	})
@@ -2031,6 +2029,28 @@ func expectProxyTargets(t testing.TB, sd *Controller, expected []model.ServiceTa
 func expectEvents(t testing.TB, ch *xdsfake.Updater, events ...Event) {
 	t.Helper()
 	ch.StrictMatchOrFail(t, events...)
+}
+
+// expectDNSEndpoints asserts every endpoint the given config contributes to the registry is marked as
+// backing a DNS resolving service. EndpointIndex.UpdateServiceEndpoints keys its push type off this,
+// so losing the flag would silently downgrade a DNS service to endpoint-only pushes.
+func expectDNSEndpoints(t testing.TB, sd *Controller, cfg *config.Config) {
+	t.Helper()
+	index := sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index
+	retry.UntilSuccessOrFail(t, func() error {
+		for _, svc := range convertServices(*cfg, nil, false) {
+			endpoints := GetEndpointsForPort(svc, index, 0)
+			if len(endpoints) == 0 {
+				return fmt.Errorf("no endpoints registered for %v", svc.Hostname)
+			}
+			for _, ep := range endpoints {
+				if !ep.DNSEndpoint {
+					return fmt.Errorf("endpoint %v of DNS service %v is not marked as a DNS endpoint", ep.Key(), svc.Hostname)
+				}
+			}
+		}
+		return nil
+	}, retry.Converge(2), retry.Timeout(time.Second*1))
 }
 
 func expectServiceInstances(t testing.TB, sd *Controller, cfg *config.Config, port int, expected ...[]*WorkloadServiceInstance) {

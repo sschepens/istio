@@ -218,10 +218,12 @@ func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) 
 	return ep, true
 }
 
-func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
+// DeleteServiceShard removes a shard's contribution to a service, returning the endpoints it held so
+// callers can inspect what was dropped without taking the locks a second time.
+func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) []*IstioEndpoint {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.deleteServiceInner(shard, serviceName, namespace, preserveKeys)
+	return e.deleteServiceInner(shard, serviceName, namespace, preserveKeys)
 }
 
 func (e *EndpointIndex) DeleteShard(shardKey ShardKey) {
@@ -256,14 +258,16 @@ func (e *EndpointIndex) PruneShard(shardKey ShardKey, keep map[string]sets.Strin
 	}
 }
 
-// must be called with lock
-func (e *EndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
+// must be called with lock. Returns the endpoints the shard held, which are no longer referenced by
+// the index once removed.
+func (e *EndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespace string, preserveKeys bool) []*IstioEndpoint {
 	if e.shardsBySvc[serviceName] == nil ||
 		e.shardsBySvc[serviceName][namespace] == nil {
-		return
+		return nil
 	}
 	epShards := e.shardsBySvc[serviceName][namespace]
 	epShards.Lock()
+	removed := epShards.Shards[shard]
 	delete(epShards.Shards, shard)
 	// Clear the cache here to avoid race in cache writes.
 	e.clearCacheForService(serviceName, namespace)
@@ -276,6 +280,7 @@ func (e *EndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespac
 		}
 	}
 	epShards.Unlock()
+	return removed
 }
 
 // PushType is an enumeration that decides what type push we should do when we get EDS update.
@@ -306,13 +311,22 @@ func (e *EndpointIndex) UpdateServiceEndpoints(
 		// but we should not delete the keys from EndpointIndex map - that will trigger
 		// unnecessary full push which can become a real problem if a pod is in crashloop and thus endpoints
 		// flip flopping between 1 and 0.
-		e.DeleteServiceShard(shard, hostname, namespace, true)
+		removed := e.DeleteServiceShard(shard, hostname, namespace, true)
+		// Emptying a DNS service still has to regenerate its cluster.
+		pushType := IncrementalPush
+		if anyDNSEndpoint(removed) {
+			pushType = FullPush
+		}
 		if logPushType {
-			log.Infof("Incremental push, service %s at shard %v has no endpoints", hostname, shard)
+			if pushType == FullPush {
+				log.Infof("Full push, DNS service %s at shard %v has no endpoints", hostname, shard)
+			} else {
+				log.Infof("Incremental push, service %s at shard %v has no endpoints", hostname, shard)
+			}
 		} else {
 			log.Infof("Cache Update, Service %s at shard %v has no endpoints", hostname, shard)
 		}
-		return IncrementalPush
+		return pushType
 	}
 
 	pushType := IncrementalPush
@@ -327,11 +341,20 @@ func (e *EndpointIndex) UpdateServiceEndpoints(
 	ep.Lock()
 	defer ep.Unlock()
 	oldIstioEndpoints := ep.Shards[shard]
-	newIstioEndpoints, needPush := endpointUpdateRequiresPush(oldIstioEndpoints, istioEndpoints)
+	newIstioEndpoints, needPush, dnsEndpoints := endpointUpdateRequiresPush(oldIstioEndpoints, istioEndpoints)
 
 	if !needPush {
 		log.Debugf("No push, either old endpoint health status did not change or new endpoint came with unhealthy status, %v", hostname)
 		pushType = NoPush
+	}
+
+	// DNS services inline their endpoints into the cluster rather than delivering them over EDS, so a
+	// change to them has to regenerate clusters.
+	if needPush && dnsEndpoints {
+		if logPushType {
+			log.Infof("Full push, DNS service endpoints changed, %v", hostname)
+		}
+		pushType = FullPush
 	}
 
 	ep.Shards[shard] = newIstioEndpoints
@@ -361,13 +384,16 @@ func (e *EndpointIndex) UpdateServiceEndpoints(
 	return pushType
 }
 
-// endpointUpdateRequiresPush determines if an endpoint update is required.
-func endpointUpdateRequiresPush(oldIstioEndpoints []*IstioEndpoint, incomingEndpoints []*IstioEndpoint) ([]*IstioEndpoint, bool) {
+// endpointUpdateRequiresPush determines if an endpoint update is required, and reports whether any of
+// the endpoints involved backs a DNS resolving service. Those are inlined into the cluster rather than
+// delivered over EDS, so a push that touches them has to be a full one.
+func endpointUpdateRequiresPush(oldIstioEndpoints []*IstioEndpoint, incomingEndpoints []*IstioEndpoint) ([]*IstioEndpoint, bool, bool) {
 	if oldIstioEndpoints == nil {
 		// If there are no old endpoints, we should push with incoming endpoints as there is nothing to compare.
-		return incomingEndpoints, true
+		return incomingEndpoints, true, anyDNSEndpoint(incomingEndpoints)
 	}
 	needPush := false
+	anyDNS := false
 	newIstioEndpoints := make([]*IstioEndpoint, 0, len(incomingEndpoints))
 	// Check if new Endpoints are ready to be pushed. This check
 	// will ensure that if a new pod comes with a non ready endpoint,
@@ -378,9 +404,11 @@ func endpointUpdateRequiresPush(oldIstioEndpoints []*IstioEndpoint, incomingEndp
 	// so that full push does not send them from shards.
 	for _, oie := range oldIstioEndpoints {
 		omap[oie.Key()] = oie
+		anyDNS = anyDNS || oie.DNSEndpoint
 	}
 	for _, nie := range incomingEndpoints {
 		nmap[nie.Key()] = nie
+		anyDNS = anyDNS || nie.DNSEndpoint
 	}
 	for _, nie := range incomingEndpoints {
 		if oie, exists := omap[nie.Key()]; exists {
@@ -412,7 +440,17 @@ func endpointUpdateRequiresPush(oldIstioEndpoints []*IstioEndpoint, incomingEndp
 		}
 	}
 
-	return newIstioEndpoints, needPush
+	return newIstioEndpoints, needPush, anyDNS
+}
+
+// anyDNSEndpoint reports whether any of the given endpoints backs a DNS resolving service.
+func anyDNSEndpoint(endpoints []*IstioEndpoint) bool {
+	for _, ep := range endpoints {
+		if ep.DNSEndpoint {
+			return true
+		}
+	}
+	return false
 }
 
 // updateShardServiceAccount updates the service endpoints' sa when service/endpoint event happens.

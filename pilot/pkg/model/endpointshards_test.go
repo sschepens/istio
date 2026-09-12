@@ -210,6 +210,24 @@ func TestUpdateServiceEndpointsNewShardPushType(t *testing.T) {
 		assert.Equal(t, len(eps.Shards[shardKey]), 1)
 	})
 
+	t.Run("dns endpoints require a full push", func(t *testing.T) {
+		endpoints := NewEndpointIndex(DisabledCache{})
+		dnsEndpoint := func(addr string) *IstioEndpoint {
+			return &IstioEndpoint{Addresses: []string{addr}, Namespace: "foo", HostName: "foo.com", DNSEndpoint: true}
+		}
+
+		// DNS endpoints are inlined into the cluster, so every change to them has to regenerate it.
+		pushType := endpoints.UpdateServiceEndpoints(shardKey, "foo.com", "foo", []*IstioEndpoint{dnsEndpoint("a.example.com")}, true)
+		assert.Equal(t, pushType, FullPush)
+
+		pushType = endpoints.UpdateServiceEndpoints(shardKey, "foo.com", "foo", []*IstioEndpoint{dnsEndpoint("b.example.com")}, true)
+		assert.Equal(t, pushType, FullPush)
+
+		// Including when they go away entirely, which empties the cluster.
+		pushType = endpoints.UpdateServiceEndpoints(shardKey, "foo.com", "foo", nil, true)
+		assert.Equal(t, pushType, FullPush)
+	})
+
 	t.Run("new service account still requires a full push", func(t *testing.T) {
 		endpoints := NewEndpointIndex(DisabledCache{})
 		pushType := endpoints.UpdateServiceEndpoints(shardKey, "foo.com", "foo", []*IstioEndpoint{

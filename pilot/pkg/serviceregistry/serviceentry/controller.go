@@ -157,10 +157,9 @@ func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool 
 }
 
 type EDSInstances struct {
-	Namespace             string
-	Host                  string
-	Instances             []*model.IstioEndpoint
-	AnyDNSServiceEndpoint bool
+	Namespace string
+	Host      string
+	Instances []*model.IstioEndpoint
 }
 
 func (e *EDSInstances) ResourceName() string {
@@ -169,9 +168,6 @@ func (e *EDSInstances) ResourceName() string {
 
 func (e *EDSInstances) Equals(other *EDSInstances) bool {
 	if e.Namespace != other.Namespace || e.Host != other.Host {
-		return false
-	}
-	if e.AnyDNSServiceEndpoint != other.AnyDNSServiceEndpoint {
 		return false
 	}
 
@@ -363,13 +359,11 @@ func (s *Controller) buildCollections() {
 			instancesByNsHost,
 			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) []*EDSInstances {
 				namespace, hostname, _ := strings.Cut(obj.Key, "/")
-				endpoints, anyDNSServiceEndpoint := mergeServiceInstances(obj.Objects)
 
 				return []*EDSInstances{{
-					Namespace:             namespace,
-					Host:                  hostname,
-					Instances:             endpoints,
-					AnyDNSServiceEndpoint: anyDNSServiceEndpoint,
+					Namespace: namespace,
+					Host:      hostname,
+					Instances: mergeServiceInstances(obj.Objects),
 				}}
 			},
 			s.opts.WithName("outputs/MergedServiceInstancesByNamespaceHost")...,
@@ -392,21 +386,18 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances
 	for _, e := range events {
 		obj := e.Latest()
 
+		// This handler operates independently from the service update mechanism, so the service may
+		// already be gone by the time we get here.
+		serviceExists := s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) != nil
+
 		if e.Event == controllers.EventDelete {
 			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, nil)
 		} else {
-			// this handler operates independently from the service update mechanism,
-			// if this handler gets delayed, we could end up re-creating EDS Shards for non-existing services.
-			if s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) == nil {
+			// If this handler gets delayed, we could end up re-creating EDS Shards for non-existing services.
+			if !serviceExists {
 				continue
 			}
 			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, obj.Instances)
-		}
-		if obj.AnyDNSServiceEndpoint {
-			s.XdsUpdater.ConfigUpdate(&model.PushRequest{
-				ConfigsUpdated: sets.New(model.ConfigKey{Kind: kind.ServiceEntry, Name: obj.Host, Namespace: obj.Namespace}),
-				Reason:         model.NewReasonStats(model.EndpointUpdate),
-			})
 		}
 	}
 }
@@ -670,8 +661,7 @@ func compareServices(i, j *model.Service) int {
 	return strings.Compare(i.Attributes.K8sAttributes.ObjectName, j.Attributes.K8sAttributes.ObjectName)
 }
 
-func mergeServiceInstances(instances []*WorkloadServiceInstance) ([]*model.IstioEndpoint, bool) {
-	anyDNSServiceEndpoint := false
+func mergeServiceInstances(instances []*WorkloadServiceInstance) []*model.IstioEndpoint {
 	ports := sets.New[int]()
 	slices.SortStableFunc(instances, func(a, b *WorkloadServiceInstance) int {
 		if r := compareServices(a.Service, b.Service); r != 0 {
@@ -687,10 +677,7 @@ func mergeServiceInstances(instances []*WorkloadServiceInstance) ([]*model.Istio
 			}
 		}
 		ports.Insert(w.ServicePort.Port)
-		if isDNSTypeService(w.Service) {
-			anyDNSServiceEndpoint = true
-		}
 		res = append(res, w.Endpoint)
 	}
-	return res, anyDNSServiceEndpoint
+	return res
 }
