@@ -736,6 +736,7 @@ func makeInstance(cfg *config.Config, workloadName string, addresses []string, p
 			TLSMode:              tlsMode,
 			Namespace:            cfg.Namespace,
 			WorkloadName:         workloadName,
+			DNSEndpoint:          isDNSTypeService(svc),
 		},
 		ServicePort: &model.Port{
 			Name:       svcPort.Name,
