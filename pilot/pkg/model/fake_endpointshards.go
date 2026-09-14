@@ -36,7 +36,7 @@ func NewEndpointIndexUpdater(ei *EndpointIndex) *FakeEndpointIndexUpdater {
 func (f *FakeEndpointIndexUpdater) ConfigUpdate(*PushRequest) {}
 
 func (f *FakeEndpointIndexUpdater) EDSUpdate(shard ShardKey, serviceName string, namespace string, eps []*IstioEndpoint) {
-	pushType := f.Index.UpdateServiceEndpoints(shard, serviceName, namespace, eps, true)
+	pushType := f.Index.UpdateServiceEndpoints(shard, serviceName, namespace, eps)
 	if pushType == NoPush {
 		return
 	}
@@ -54,7 +54,7 @@ func (f *FakeEndpointIndexUpdater) EDSUpdate(shard ShardKey, serviceName string,
 }
 
 func (f *FakeEndpointIndexUpdater) EDSCacheUpdate(shard ShardKey, serviceName string, namespace string, eps []*IstioEndpoint) {
-	f.Index.UpdateServiceEndpoints(shard, serviceName, namespace, eps, false)
+	f.Index.OverwriteServiceEndpoints(shard, serviceName, namespace, eps)
 }
 
 func (f *FakeEndpointIndexUpdater) SvcUpdate(shard ShardKey, hostname string, namespace string, event Event) {

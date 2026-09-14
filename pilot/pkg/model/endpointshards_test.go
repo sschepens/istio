@@ -15,9 +15,12 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
+	"istio.io/istio/pkg/config/labels"
 	"istio.io/istio/pkg/test/util/assert"
+	"istio.io/istio/pkg/util/sets"
 )
 
 func TestUpdateServiceAccount(t *testing.T) {
@@ -180,9 +183,96 @@ func TestUpdateServiceEndpoints(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			endpoints.UpdateServiceEndpoints(tc.shardKey, tc.hostname, tc.namespace, tc.endpoints, true)
+			endpoints.UpdateServiceEndpoints(tc.shardKey, tc.hostname, tc.namespace, tc.endpoints)
 			eps, _ := endpoints.ShardsForService(tc.hostname, tc.namespace)
 			assert.Equal(t, len(eps.Shards[tc.shardKey]), tc.expect)
+		})
+	}
+}
+
+func TestOverwriteServiceEndpoints(t *testing.T) {
+	shard := ShardKey{Cluster: "c1"}
+	index := NewEndpointIndex(DisabledCache{})
+
+	eps := []*IstioEndpoint{
+		{Addresses: []string{"10.0.0.1"}, Namespace: "foo", ServiceAccount: "sa1"},
+		{Addresses: []string{"10.0.0.2"}, Namespace: "foo", ServiceAccount: "sa2"},
+	}
+	index.OverwriteServiceEndpoints(shard, "foo.com", "foo", eps)
+	got, f := index.ShardsForService("foo.com", "foo")
+	assert.Equal(t, f, true)
+	assert.Equal(t, got.Shards[shard], eps)
+	assert.Equal(t, got.ServiceAccounts, sets.New("sa1", "sa2"))
+
+	// An overwrite replaces the shard wholesale, including derived service accounts.
+	index.OverwriteServiceEndpoints(shard, "foo.com", "foo", eps[:1])
+	got, _ = index.ShardsForService("foo.com", "foo")
+	assert.Equal(t, got.Shards[shard], eps[:1])
+	assert.Equal(t, got.ServiceAccounts, sets.New("sa1"))
+
+	// No endpoints drops the shard, but keeps the service in the index.
+	index.OverwriteServiceEndpoints(shard, "foo.com", "foo", nil)
+	got, f = index.ShardsForService("foo.com", "foo")
+	assert.Equal(t, f, true)
+	assert.Equal(t, len(got.Shards), 0)
+}
+
+func benchEndpoints(n int) []*IstioEndpoint {
+	eps := make([]*IstioEndpoint, 0, n)
+	for i := range n {
+		eps = append(eps, &IstioEndpoint{
+			Addresses:       []string{fmt.Sprintf("10.0.%d.%d", i/256, i%256)},
+			ServicePortName: "http",
+			EndpointPort:    8080,
+			// Endpoints of a service normally share a service account.
+			ServiceAccount: "spiffe://cluster.local/ns/foo/sa/foo",
+			Namespace:      "foo",
+			WorkloadName:   fmt.Sprintf("workload-%d", i),
+			Labels: labels.Instance{
+				"app":                              "foo",
+				"version":                          "v1",
+				"pod-template-hash":                "5d9c8f7b6c",
+				"security.istio.io/tlsMode":        "istio",
+				"service.istio.io/canonical-name":  "foo",
+				"topology.istio.io/network":        "network-1",
+				"topology.kubernetes.io/region":    "us-east-1",
+				"topology.kubernetes.io/zone":      "us-east-1a",
+				"service.istio.io/canonical-revis": "v1",
+			},
+		})
+	}
+	return eps
+}
+
+// BenchmarkUpdateServiceEndpoints and BenchmarkOverwriteServiceEndpoints measure the two update
+// paths against an unchanged set of endpoints - the common case when a shard is recomputed because
+// something other than the endpoints themselves changed.
+func BenchmarkUpdateServiceEndpoints(b *testing.B) {
+	for _, n := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			index := NewEndpointIndex(DisabledCache{})
+			shard := ShardKey{Cluster: "c1"}
+			eps := benchEndpoints(n)
+			index.UpdateServiceEndpoints(shard, "foo.com", "foo", eps)
+			b.ResetTimer()
+			for b.Loop() {
+				index.UpdateServiceEndpoints(shard, "foo.com", "foo", eps)
+			}
+		})
+	}
+}
+
+func BenchmarkOverwriteServiceEndpoints(b *testing.B) {
+	for _, n := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			index := NewEndpointIndex(DisabledCache{})
+			shard := ShardKey{Cluster: "c1"}
+			eps := benchEndpoints(n)
+			index.OverwriteServiceEndpoints(shard, "foo.com", "foo", eps)
+			b.ResetTimer()
+			for b.Loop() {
+				index.OverwriteServiceEndpoints(shard, "foo.com", "foo", eps)
+			}
 		})
 	}
 }

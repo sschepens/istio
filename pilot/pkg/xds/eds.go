@@ -53,7 +53,7 @@ func (s *DiscoveryServer) EDSUpdate(shard model.ShardKey, serviceName string, na
 ) {
 	inboundEDSUpdates.Increment()
 	// Update the endpoint shards
-	pushType := s.Env.EndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, true)
+	pushType := s.Env.EndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints)
 	if pushType != model.NoPush {
 		configKind := kind.Endpoints
 		if pushType == model.FullPush {
@@ -73,13 +73,15 @@ func (s *DiscoveryServer) EDSUpdate(shard model.ShardKey, serviceName string, na
 // the hostname-keyed map. And it avoids the conversion from Endpoint to ServiceEntry to envoy
 // on each step: instead the conversion happens once, when an endpoint is first discovered.
 //
-// Note: the difference with `EDSUpdate` is that it only update the cache rather than requesting a push
+// Note: the difference with `EDSUpdate` is that it only update the cache rather than requesting a push.
+// Since no push decision is made here, the shard is overwritten without diffing it against its
+// previous contents.
 func (s *DiscoveryServer) EDSCacheUpdate(shard model.ShardKey, serviceName string, namespace string,
 	istioEndpoints []*model.IstioEndpoint,
 ) {
 	inboundEDSUpdates.Increment()
 	// Update the endpoint shards
-	s.Env.EndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, false)
+	s.Env.EndpointIndex.OverwriteServiceEndpoints(shard, serviceName, namespace, istioEndpoints)
 }
 
 func (s *DiscoveryServer) RemoveShard(shardKey model.ShardKey) {
