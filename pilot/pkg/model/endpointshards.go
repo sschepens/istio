@@ -399,7 +399,7 @@ func endpointUpdateRequiresPush(oldIstioEndpoints []*IstioEndpoint, incomingEndp
 	// will ensure that if a new pod comes with a non ready endpoint,
 	// we do not unnecessarily push that config to Envoy.
 	omap := make(map[string]*IstioEndpoint, len(oldIstioEndpoints))
-	nmap := make(map[string]*IstioEndpoint, len(newIstioEndpoints))
+	nmap := make(map[string]*IstioEndpoint, len(incomingEndpoints))
 	// Add new endpoints only if they are ever ready once to shards
 	// so that full push does not send them from shards.
 	for _, oie := range oldIstioEndpoints {
