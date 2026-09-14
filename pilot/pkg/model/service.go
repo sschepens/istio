@@ -2155,6 +2155,11 @@ func (s *Service) DeepCopy() *Service {
 
 // Equals compares two service objects.
 func (s *Service) Equals(other *Service) bool {
+	// The same pointer is trivially equal. Registries hand the same *Service to every instance derived
+	// from it, making this the common case when comparing instances.
+	if s == other {
+		return true
+	}
 	eql := s.DefaultAddress == other.DefaultAddress && s.AutoAllocatedIPv4Address == other.AutoAllocatedIPv4Address &&
 		s.AutoAllocatedIPv6Address == other.AutoAllocatedIPv6Address && s.Hostname == other.Hostname &&
 		s.Resolution == other.Resolution && s.MeshExternal == other.MeshExternal
@@ -2206,6 +2211,9 @@ func (ep *IstioEndpoint) ShallowCopy() *IstioEndpoint {
 
 // Equals checks whether the attributes are equal from the passed in service.
 func (ep *IstioEndpoint) Equals(other *IstioEndpoint) bool {
+	if ep == other {
+		return true
+	}
 	// Check things we can directly compare...
 	eq := ep.ServicePortName == other.ServicePortName &&
 		ep.LegacyClusterPortKey == other.LegacyClusterPortKey &&
