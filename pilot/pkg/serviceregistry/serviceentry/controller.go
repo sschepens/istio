@@ -128,10 +128,16 @@ func (swi ServiceWithInstances) ResourceName() string {
 }
 
 func (swi ServiceWithInstances) Equals(other ServiceWithInstances) bool {
-	return swi.Service.Equals(other.Service) &&
-		slices.EqualFunc(swi.Instances, other.Instances, func(a, b *WorkloadServiceInstance) bool {
-			return a.Equals(b)
-		})
+	if !swi.Service.Equals(other.Service) {
+		return false
+	}
+	// Every instance points at swi.Service, which was just compared, so only the per-instance fields
+	// are checked here rather than deep-comparing the service once more per instance.
+	return slices.EqualFunc(swi.Instances, other.Instances, func(a, b *WorkloadServiceInstance) bool {
+		return a.UID == b.UID &&
+			a.ServicePort.Equals(b.ServicePort) &&
+			a.Endpoint.Equals(b.Endpoint)
+	})
 }
 
 type WorkloadServiceInstance struct {
@@ -148,6 +154,9 @@ func (wsi *WorkloadServiceInstance) ResourceName() string {
 }
 
 func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool {
+	if wsi == other {
+		return true
+	}
 	// Equality is determined by the UID, ServicePort, Endpoint, and Service. Namespace and Name
 	// are already included in the UID.
 	return wsi.UID == other.UID &&
