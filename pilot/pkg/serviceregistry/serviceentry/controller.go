@@ -637,6 +637,10 @@ func (s *Controller) HasSynced() bool {
 }
 
 func compareServices(i, j *model.Service) int {
+	if i == j {
+		return 0
+	}
+
 	if r := i.CreationTime.Compare(j.CreationTime); r != 0 {
 		return r
 	}
@@ -659,7 +663,7 @@ func compareServices(i, j *model.Service) int {
 
 func mergeServiceInstances(instances []*WorkloadServiceInstance) []*model.IstioEndpoint {
 	ports := sets.New[int]()
-	slices.SortStableFunc(instances, func(a, b *WorkloadServiceInstance) int {
+	slices.SortFunc(instances, func(a, b *WorkloadServiceInstance) int {
 		if r := compareServices(a.Service, b.Service); r != 0 {
 			return r
 		}
