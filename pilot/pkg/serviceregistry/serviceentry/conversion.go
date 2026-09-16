@@ -353,6 +353,7 @@ func convertServiceEntryToInstances(
 
 	out := make([]*WorkloadServiceInstance, 0, len(serviceEntry.Ports)*endpointsNum)
 	if hostnameToServiceInstance {
+		uidPrefix := cfg.Namespace + "/" + cfg.Name + "/" + service.ResourceName() + "/"
 		for _, servicePort := range service.Ports {
 			// Note: only convert the hostname to service instance if WorkloadSelector is not set
 			// when service entry has discovery type DNS and no endpoints.
@@ -381,7 +382,7 @@ func convertServiceEntryToInstances(
 				Service:     service,
 				ServicePort: servicePort,
 			}
-			instance.UID = generateWorkloadServiceInstanceUID(instance)
+			instance.UID = uidPrefix + instance.Endpoint.Key() + "/" + strconv.Itoa(servicePort.Port)
 			out = append(out, instance)
 		}
 	} else {
@@ -414,13 +415,18 @@ func getTLSModeFromWorkloadEntry(wle *networking.WorkloadEntry) string {
 // The workload instance has no service or service-port association, so create one instance per service port.
 func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance, service *model.Service) []*WorkloadServiceInstance {
 	out := make([]*WorkloadServiceInstance, 0, len(service.Ports))
+	dnsService := isDNSTypeService(service)
+	// unix addresses can only happen on workload entries which have only one address
+	addrs := workloadInstance.Endpoint.Addresses
+	unixAddress := len(addrs) == 1 && strings.HasPrefix(addrs[0], model.UnixAddressPrefix)
+	if unixAddress {
+		addrs = []string{strings.TrimPrefix(addrs[0], model.UnixAddressPrefix)}
+	}
+	uidPrefix := workloadInstance.Namespace + "/" + workloadInstance.Name + "/" + service.ResourceName() + "/"
 	for _, servicePort := range service.Ports {
 		var targetPort uint32
-		addrs := workloadInstance.Endpoint.Addresses
 		// priority level: unixAddress > we.ports > se.port.targetPort > se.port.number
-		// unix addresses can only happen on workload entries which have only one address
-		if len(workloadInstance.Endpoint.Addresses) == 1 && strings.HasPrefix(workloadInstance.Endpoint.Addresses[0], model.UnixAddressPrefix) {
-			addrs = []string{strings.TrimPrefix(workloadInstance.Endpoint.Addresses[0], model.UnixAddressPrefix)}
+		if unixAddress {
 			targetPort = 0
 		} else if port, ok := workloadInstance.PortMap[servicePort.Name]; ok && port > 0 {
 			targetPort = port
@@ -432,7 +438,7 @@ func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance
 		ep.LegacyClusterPortKey = servicePort.Port
 		ep.Addresses = addrs
 		ep.EndpointPort = targetPort
-		ep.DNSEndpoint = isDNSTypeService(service)
+		ep.DNSEndpoint = dnsService
 		if ep.Namespace == "" {
 			ep.Namespace = workloadInstance.Namespace
 		}
@@ -447,7 +453,7 @@ func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance
 			Service:     service,
 			ServicePort: servicePort,
 		}
-		instance.UID = generateWorkloadServiceInstanceUID(instance)
+		instance.UID = uidPrefix + ep.Key() + "/" + strconv.Itoa(servicePort.Port)
 		out = append(out, instance)
 	}
 	return out
