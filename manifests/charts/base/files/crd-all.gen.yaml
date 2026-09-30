@@ -793,6 +793,93 @@ spec:
                     trafficPolicy:
                       description: Traffic policies that apply to this subset.
                       properties:
+                        admissionControl:
+                          description: Admission control based on the observed success
+                            rate of the upstream service.
+                          oneOf:
+                          - not:
+                              anyOf:
+                              - required:
+                                - successRate
+                          - required:
+                            - successRate
+                          properties:
+                            successRate:
+                              description: Shed load based on the observed success
+                                rate of the upstream service.
+                              properties:
+                                aggression:
+                                  description: Controls how aggressively requests
+                                    are shed as the success rate drops below `threshold`.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                maximumRejectionPercent:
+                                  description: The maximum percentage of requests
+                                    that may be shed, even as the success rate keeps
+                                    falling.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                minimumAttemptRate:
+                                  description: The minimum average request rate (requests
+                                    per second) over the sampling window required
+                                    before any shedding occurs.
+                                  maximum: 4294967295
+                                  minimum: 0
+                                  nullable: true
+                                  type: integer
+                                samplingWindow:
+                                  description: The sliding time window over which
+                                    the success rate is calculated.
+                                  type: string
+                                successCriteria:
+                                  description: Criteria that classify an upstream
+                                    response as a success for the purpose of the success-rate
+                                    signal.
+                                  properties:
+                                    grpc:
+                                      description: Success criteria for gRPC responses.
+                                      properties:
+                                        statusCodes:
+                                          description: Canonical gRPC status names
+                                            such as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    http:
+                                      description: Success criteria for HTTP responses.
+                                      properties:
+                                        statusRanges:
+                                          description: The set of HTTP status ranges
+                                            considered successful.
+                                          items:
+                                            properties:
+                                              end:
+                                                description: Exclusive upper bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                              start:
+                                                description: Inclusive lower bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                            type: object
+                                          type: array
+                                      type: object
+                                  type: object
+                                threshold:
+                                  description: The success rate, as a percentage,
+                                    at or below which requests begin to be rejected.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                              type: object
+                          type: object
                         connectionPool:
                           properties:
                             http:
@@ -1284,6 +1371,98 @@ spec:
                           description: Traffic policies specific to individual ports.
                           items:
                             properties:
+                              admissionControl:
+                                description: Admission control based on the observed
+                                  success rate of the upstream service, applied to
+                                  this specific port.
+                                oneOf:
+                                - not:
+                                    anyOf:
+                                    - required:
+                                      - successRate
+                                - required:
+                                  - successRate
+                                properties:
+                                  successRate:
+                                    description: Shed load based on the observed success
+                                      rate of the upstream service.
+                                    properties:
+                                      aggression:
+                                        description: Controls how aggressively requests
+                                          are shed as the success rate drops below
+                                          `threshold`.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                      maximumRejectionPercent:
+                                        description: The maximum percentage of requests
+                                          that may be shed, even as the success rate
+                                          keeps falling.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                      minimumAttemptRate:
+                                        description: The minimum average request rate
+                                          (requests per second) over the sampling
+                                          window required before any shedding occurs.
+                                        maximum: 4294967295
+                                        minimum: 0
+                                        nullable: true
+                                        type: integer
+                                      samplingWindow:
+                                        description: The sliding time window over
+                                          which the success rate is calculated.
+                                        type: string
+                                      successCriteria:
+                                        description: Criteria that classify an upstream
+                                          response as a success for the purpose of
+                                          the success-rate signal.
+                                        properties:
+                                          grpc:
+                                            description: Success criteria for gRPC
+                                              responses.
+                                            properties:
+                                              statusCodes:
+                                                description: Canonical gRPC status
+                                                  names such as `OK`, `NOT_FOUND`,
+                                                  or `UNAVAILABLE`.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            type: object
+                                          http:
+                                            description: Success criteria for HTTP
+                                              responses.
+                                            properties:
+                                              statusRanges:
+                                                description: The set of HTTP status
+                                                  ranges considered successful.
+                                                items:
+                                                  properties:
+                                                    end:
+                                                      description: Exclusive upper
+                                                        bound of the range.
+                                                      maximum: 600
+                                                      minimum: 100
+                                                      type: integer
+                                                    start:
+                                                      description: Inclusive lower
+                                                        bound of the range.
+                                                      maximum: 600
+                                                      minimum: 100
+                                                      type: integer
+                                                  type: object
+                                                type: array
+                                            type: object
+                                        type: object
+                                      threshold:
+                                        description: The success rate, as a percentage,
+                                          at or below which requests begin to be rejected.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                    type: object
+                                type: object
                               connectionPool:
                                 properties:
                                   http:
@@ -1985,6 +2164,91 @@ spec:
                 description: Traffic policies to apply (load balancing policy, connection
                   pool sizes, outlier detection).
                 properties:
+                  admissionControl:
+                    description: Admission control based on the observed success rate
+                      of the upstream service.
+                    oneOf:
+                    - not:
+                        anyOf:
+                        - required:
+                          - successRate
+                    - required:
+                      - successRate
+                    properties:
+                      successRate:
+                        description: Shed load based on the observed success rate
+                          of the upstream service.
+                        properties:
+                          aggression:
+                            description: Controls how aggressively requests are shed
+                              as the success rate drops below `threshold`.
+                            format: double
+                            nullable: true
+                            type: number
+                          maximumRejectionPercent:
+                            description: The maximum percentage of requests that may
+                              be shed, even as the success rate keeps falling.
+                            format: double
+                            nullable: true
+                            type: number
+                          minimumAttemptRate:
+                            description: The minimum average request rate (requests
+                              per second) over the sampling window required before
+                              any shedding occurs.
+                            maximum: 4294967295
+                            minimum: 0
+                            nullable: true
+                            type: integer
+                          samplingWindow:
+                            description: The sliding time window over which the success
+                              rate is calculated.
+                            type: string
+                          successCriteria:
+                            description: Criteria that classify an upstream response
+                              as a success for the purpose of the success-rate signal.
+                            properties:
+                              grpc:
+                                description: Success criteria for gRPC responses.
+                                properties:
+                                  statusCodes:
+                                    description: Canonical gRPC status names such
+                                      as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              http:
+                                description: Success criteria for HTTP responses.
+                                properties:
+                                  statusRanges:
+                                    description: The set of HTTP status ranges considered
+                                      successful.
+                                    items:
+                                      properties:
+                                        end:
+                                          description: Exclusive upper bound of the
+                                            range.
+                                          maximum: 600
+                                          minimum: 100
+                                          type: integer
+                                        start:
+                                          description: Inclusive lower bound of the
+                                            range.
+                                          maximum: 600
+                                          minimum: 100
+                                          type: integer
+                                      type: object
+                                    type: array
+                                type: object
+                            type: object
+                          threshold:
+                            description: The success rate, as a percentage, at or
+                              below which requests begin to be rejected.
+                            format: double
+                            nullable: true
+                            type: number
+                        type: object
+                    type: object
                   connectionPool:
                     properties:
                       http:
@@ -2455,6 +2719,94 @@ spec:
                     description: Traffic policies specific to individual ports.
                     items:
                       properties:
+                        admissionControl:
+                          description: Admission control based on the observed success
+                            rate of the upstream service, applied to this specific
+                            port.
+                          oneOf:
+                          - not:
+                              anyOf:
+                              - required:
+                                - successRate
+                          - required:
+                            - successRate
+                          properties:
+                            successRate:
+                              description: Shed load based on the observed success
+                                rate of the upstream service.
+                              properties:
+                                aggression:
+                                  description: Controls how aggressively requests
+                                    are shed as the success rate drops below `threshold`.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                maximumRejectionPercent:
+                                  description: The maximum percentage of requests
+                                    that may be shed, even as the success rate keeps
+                                    falling.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                minimumAttemptRate:
+                                  description: The minimum average request rate (requests
+                                    per second) over the sampling window required
+                                    before any shedding occurs.
+                                  maximum: 4294967295
+                                  minimum: 0
+                                  nullable: true
+                                  type: integer
+                                samplingWindow:
+                                  description: The sliding time window over which
+                                    the success rate is calculated.
+                                  type: string
+                                successCriteria:
+                                  description: Criteria that classify an upstream
+                                    response as a success for the purpose of the success-rate
+                                    signal.
+                                  properties:
+                                    grpc:
+                                      description: Success criteria for gRPC responses.
+                                      properties:
+                                        statusCodes:
+                                          description: Canonical gRPC status names
+                                            such as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    http:
+                                      description: Success criteria for HTTP responses.
+                                      properties:
+                                        statusRanges:
+                                          description: The set of HTTP status ranges
+                                            considered successful.
+                                          items:
+                                            properties:
+                                              end:
+                                                description: Exclusive upper bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                              start:
+                                                description: Inclusive lower bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                            type: object
+                                          type: array
+                                      type: object
+                                  type: object
+                                threshold:
+                                  description: The success rate, as a percentage,
+                                    at or below which requests begin to be rejected.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                              type: object
+                          type: object
                         connectionPool:
                           properties:
                             http:
@@ -3279,6 +3631,93 @@ spec:
                     trafficPolicy:
                       description: Traffic policies that apply to this subset.
                       properties:
+                        admissionControl:
+                          description: Admission control based on the observed success
+                            rate of the upstream service.
+                          oneOf:
+                          - not:
+                              anyOf:
+                              - required:
+                                - successRate
+                          - required:
+                            - successRate
+                          properties:
+                            successRate:
+                              description: Shed load based on the observed success
+                                rate of the upstream service.
+                              properties:
+                                aggression:
+                                  description: Controls how aggressively requests
+                                    are shed as the success rate drops below `threshold`.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                maximumRejectionPercent:
+                                  description: The maximum percentage of requests
+                                    that may be shed, even as the success rate keeps
+                                    falling.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                minimumAttemptRate:
+                                  description: The minimum average request rate (requests
+                                    per second) over the sampling window required
+                                    before any shedding occurs.
+                                  maximum: 4294967295
+                                  minimum: 0
+                                  nullable: true
+                                  type: integer
+                                samplingWindow:
+                                  description: The sliding time window over which
+                                    the success rate is calculated.
+                                  type: string
+                                successCriteria:
+                                  description: Criteria that classify an upstream
+                                    response as a success for the purpose of the success-rate
+                                    signal.
+                                  properties:
+                                    grpc:
+                                      description: Success criteria for gRPC responses.
+                                      properties:
+                                        statusCodes:
+                                          description: Canonical gRPC status names
+                                            such as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    http:
+                                      description: Success criteria for HTTP responses.
+                                      properties:
+                                        statusRanges:
+                                          description: The set of HTTP status ranges
+                                            considered successful.
+                                          items:
+                                            properties:
+                                              end:
+                                                description: Exclusive upper bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                              start:
+                                                description: Inclusive lower bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                            type: object
+                                          type: array
+                                      type: object
+                                  type: object
+                                threshold:
+                                  description: The success rate, as a percentage,
+                                    at or below which requests begin to be rejected.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                              type: object
+                          type: object
                         connectionPool:
                           properties:
                             http:
@@ -3770,6 +4209,98 @@ spec:
                           description: Traffic policies specific to individual ports.
                           items:
                             properties:
+                              admissionControl:
+                                description: Admission control based on the observed
+                                  success rate of the upstream service, applied to
+                                  this specific port.
+                                oneOf:
+                                - not:
+                                    anyOf:
+                                    - required:
+                                      - successRate
+                                - required:
+                                  - successRate
+                                properties:
+                                  successRate:
+                                    description: Shed load based on the observed success
+                                      rate of the upstream service.
+                                    properties:
+                                      aggression:
+                                        description: Controls how aggressively requests
+                                          are shed as the success rate drops below
+                                          `threshold`.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                      maximumRejectionPercent:
+                                        description: The maximum percentage of requests
+                                          that may be shed, even as the success rate
+                                          keeps falling.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                      minimumAttemptRate:
+                                        description: The minimum average request rate
+                                          (requests per second) over the sampling
+                                          window required before any shedding occurs.
+                                        maximum: 4294967295
+                                        minimum: 0
+                                        nullable: true
+                                        type: integer
+                                      samplingWindow:
+                                        description: The sliding time window over
+                                          which the success rate is calculated.
+                                        type: string
+                                      successCriteria:
+                                        description: Criteria that classify an upstream
+                                          response as a success for the purpose of
+                                          the success-rate signal.
+                                        properties:
+                                          grpc:
+                                            description: Success criteria for gRPC
+                                              responses.
+                                            properties:
+                                              statusCodes:
+                                                description: Canonical gRPC status
+                                                  names such as `OK`, `NOT_FOUND`,
+                                                  or `UNAVAILABLE`.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            type: object
+                                          http:
+                                            description: Success criteria for HTTP
+                                              responses.
+                                            properties:
+                                              statusRanges:
+                                                description: The set of HTTP status
+                                                  ranges considered successful.
+                                                items:
+                                                  properties:
+                                                    end:
+                                                      description: Exclusive upper
+                                                        bound of the range.
+                                                      maximum: 600
+                                                      minimum: 100
+                                                      type: integer
+                                                    start:
+                                                      description: Inclusive lower
+                                                        bound of the range.
+                                                      maximum: 600
+                                                      minimum: 100
+                                                      type: integer
+                                                  type: object
+                                                type: array
+                                            type: object
+                                        type: object
+                                      threshold:
+                                        description: The success rate, as a percentage,
+                                          at or below which requests begin to be rejected.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                    type: object
+                                type: object
                               connectionPool:
                                 properties:
                                   http:
@@ -4471,6 +5002,91 @@ spec:
                 description: Traffic policies to apply (load balancing policy, connection
                   pool sizes, outlier detection).
                 properties:
+                  admissionControl:
+                    description: Admission control based on the observed success rate
+                      of the upstream service.
+                    oneOf:
+                    - not:
+                        anyOf:
+                        - required:
+                          - successRate
+                    - required:
+                      - successRate
+                    properties:
+                      successRate:
+                        description: Shed load based on the observed success rate
+                          of the upstream service.
+                        properties:
+                          aggression:
+                            description: Controls how aggressively requests are shed
+                              as the success rate drops below `threshold`.
+                            format: double
+                            nullable: true
+                            type: number
+                          maximumRejectionPercent:
+                            description: The maximum percentage of requests that may
+                              be shed, even as the success rate keeps falling.
+                            format: double
+                            nullable: true
+                            type: number
+                          minimumAttemptRate:
+                            description: The minimum average request rate (requests
+                              per second) over the sampling window required before
+                              any shedding occurs.
+                            maximum: 4294967295
+                            minimum: 0
+                            nullable: true
+                            type: integer
+                          samplingWindow:
+                            description: The sliding time window over which the success
+                              rate is calculated.
+                            type: string
+                          successCriteria:
+                            description: Criteria that classify an upstream response
+                              as a success for the purpose of the success-rate signal.
+                            properties:
+                              grpc:
+                                description: Success criteria for gRPC responses.
+                                properties:
+                                  statusCodes:
+                                    description: Canonical gRPC status names such
+                                      as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              http:
+                                description: Success criteria for HTTP responses.
+                                properties:
+                                  statusRanges:
+                                    description: The set of HTTP status ranges considered
+                                      successful.
+                                    items:
+                                      properties:
+                                        end:
+                                          description: Exclusive upper bound of the
+                                            range.
+                                          maximum: 600
+                                          minimum: 100
+                                          type: integer
+                                        start:
+                                          description: Inclusive lower bound of the
+                                            range.
+                                          maximum: 600
+                                          minimum: 100
+                                          type: integer
+                                      type: object
+                                    type: array
+                                type: object
+                            type: object
+                          threshold:
+                            description: The success rate, as a percentage, at or
+                              below which requests begin to be rejected.
+                            format: double
+                            nullable: true
+                            type: number
+                        type: object
+                    type: object
                   connectionPool:
                     properties:
                       http:
@@ -4941,6 +5557,94 @@ spec:
                     description: Traffic policies specific to individual ports.
                     items:
                       properties:
+                        admissionControl:
+                          description: Admission control based on the observed success
+                            rate of the upstream service, applied to this specific
+                            port.
+                          oneOf:
+                          - not:
+                              anyOf:
+                              - required:
+                                - successRate
+                          - required:
+                            - successRate
+                          properties:
+                            successRate:
+                              description: Shed load based on the observed success
+                                rate of the upstream service.
+                              properties:
+                                aggression:
+                                  description: Controls how aggressively requests
+                                    are shed as the success rate drops below `threshold`.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                maximumRejectionPercent:
+                                  description: The maximum percentage of requests
+                                    that may be shed, even as the success rate keeps
+                                    falling.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                minimumAttemptRate:
+                                  description: The minimum average request rate (requests
+                                    per second) over the sampling window required
+                                    before any shedding occurs.
+                                  maximum: 4294967295
+                                  minimum: 0
+                                  nullable: true
+                                  type: integer
+                                samplingWindow:
+                                  description: The sliding time window over which
+                                    the success rate is calculated.
+                                  type: string
+                                successCriteria:
+                                  description: Criteria that classify an upstream
+                                    response as a success for the purpose of the success-rate
+                                    signal.
+                                  properties:
+                                    grpc:
+                                      description: Success criteria for gRPC responses.
+                                      properties:
+                                        statusCodes:
+                                          description: Canonical gRPC status names
+                                            such as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    http:
+                                      description: Success criteria for HTTP responses.
+                                      properties:
+                                        statusRanges:
+                                          description: The set of HTTP status ranges
+                                            considered successful.
+                                          items:
+                                            properties:
+                                              end:
+                                                description: Exclusive upper bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                              start:
+                                                description: Inclusive lower bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                            type: object
+                                          type: array
+                                      type: object
+                                  type: object
+                                threshold:
+                                  description: The success rate, as a percentage,
+                                    at or below which requests begin to be rejected.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                              type: object
+                          type: object
                         connectionPool:
                           properties:
                             http:
@@ -5765,6 +6469,93 @@ spec:
                     trafficPolicy:
                       description: Traffic policies that apply to this subset.
                       properties:
+                        admissionControl:
+                          description: Admission control based on the observed success
+                            rate of the upstream service.
+                          oneOf:
+                          - not:
+                              anyOf:
+                              - required:
+                                - successRate
+                          - required:
+                            - successRate
+                          properties:
+                            successRate:
+                              description: Shed load based on the observed success
+                                rate of the upstream service.
+                              properties:
+                                aggression:
+                                  description: Controls how aggressively requests
+                                    are shed as the success rate drops below `threshold`.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                maximumRejectionPercent:
+                                  description: The maximum percentage of requests
+                                    that may be shed, even as the success rate keeps
+                                    falling.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                minimumAttemptRate:
+                                  description: The minimum average request rate (requests
+                                    per second) over the sampling window required
+                                    before any shedding occurs.
+                                  maximum: 4294967295
+                                  minimum: 0
+                                  nullable: true
+                                  type: integer
+                                samplingWindow:
+                                  description: The sliding time window over which
+                                    the success rate is calculated.
+                                  type: string
+                                successCriteria:
+                                  description: Criteria that classify an upstream
+                                    response as a success for the purpose of the success-rate
+                                    signal.
+                                  properties:
+                                    grpc:
+                                      description: Success criteria for gRPC responses.
+                                      properties:
+                                        statusCodes:
+                                          description: Canonical gRPC status names
+                                            such as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    http:
+                                      description: Success criteria for HTTP responses.
+                                      properties:
+                                        statusRanges:
+                                          description: The set of HTTP status ranges
+                                            considered successful.
+                                          items:
+                                            properties:
+                                              end:
+                                                description: Exclusive upper bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                              start:
+                                                description: Inclusive lower bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                            type: object
+                                          type: array
+                                      type: object
+                                  type: object
+                                threshold:
+                                  description: The success rate, as a percentage,
+                                    at or below which requests begin to be rejected.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                              type: object
+                          type: object
                         connectionPool:
                           properties:
                             http:
@@ -6256,6 +7047,98 @@ spec:
                           description: Traffic policies specific to individual ports.
                           items:
                             properties:
+                              admissionControl:
+                                description: Admission control based on the observed
+                                  success rate of the upstream service, applied to
+                                  this specific port.
+                                oneOf:
+                                - not:
+                                    anyOf:
+                                    - required:
+                                      - successRate
+                                - required:
+                                  - successRate
+                                properties:
+                                  successRate:
+                                    description: Shed load based on the observed success
+                                      rate of the upstream service.
+                                    properties:
+                                      aggression:
+                                        description: Controls how aggressively requests
+                                          are shed as the success rate drops below
+                                          `threshold`.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                      maximumRejectionPercent:
+                                        description: The maximum percentage of requests
+                                          that may be shed, even as the success rate
+                                          keeps falling.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                      minimumAttemptRate:
+                                        description: The minimum average request rate
+                                          (requests per second) over the sampling
+                                          window required before any shedding occurs.
+                                        maximum: 4294967295
+                                        minimum: 0
+                                        nullable: true
+                                        type: integer
+                                      samplingWindow:
+                                        description: The sliding time window over
+                                          which the success rate is calculated.
+                                        type: string
+                                      successCriteria:
+                                        description: Criteria that classify an upstream
+                                          response as a success for the purpose of
+                                          the success-rate signal.
+                                        properties:
+                                          grpc:
+                                            description: Success criteria for gRPC
+                                              responses.
+                                            properties:
+                                              statusCodes:
+                                                description: Canonical gRPC status
+                                                  names such as `OK`, `NOT_FOUND`,
+                                                  or `UNAVAILABLE`.
+                                                items:
+                                                  type: string
+                                                type: array
+                                            type: object
+                                          http:
+                                            description: Success criteria for HTTP
+                                              responses.
+                                            properties:
+                                              statusRanges:
+                                                description: The set of HTTP status
+                                                  ranges considered successful.
+                                                items:
+                                                  properties:
+                                                    end:
+                                                      description: Exclusive upper
+                                                        bound of the range.
+                                                      maximum: 600
+                                                      minimum: 100
+                                                      type: integer
+                                                    start:
+                                                      description: Inclusive lower
+                                                        bound of the range.
+                                                      maximum: 600
+                                                      minimum: 100
+                                                      type: integer
+                                                  type: object
+                                                type: array
+                                            type: object
+                                        type: object
+                                      threshold:
+                                        description: The success rate, as a percentage,
+                                          at or below which requests begin to be rejected.
+                                        format: double
+                                        nullable: true
+                                        type: number
+                                    type: object
+                                type: object
                               connectionPool:
                                 properties:
                                   http:
@@ -6957,6 +7840,91 @@ spec:
                 description: Traffic policies to apply (load balancing policy, connection
                   pool sizes, outlier detection).
                 properties:
+                  admissionControl:
+                    description: Admission control based on the observed success rate
+                      of the upstream service.
+                    oneOf:
+                    - not:
+                        anyOf:
+                        - required:
+                          - successRate
+                    - required:
+                      - successRate
+                    properties:
+                      successRate:
+                        description: Shed load based on the observed success rate
+                          of the upstream service.
+                        properties:
+                          aggression:
+                            description: Controls how aggressively requests are shed
+                              as the success rate drops below `threshold`.
+                            format: double
+                            nullable: true
+                            type: number
+                          maximumRejectionPercent:
+                            description: The maximum percentage of requests that may
+                              be shed, even as the success rate keeps falling.
+                            format: double
+                            nullable: true
+                            type: number
+                          minimumAttemptRate:
+                            description: The minimum average request rate (requests
+                              per second) over the sampling window required before
+                              any shedding occurs.
+                            maximum: 4294967295
+                            minimum: 0
+                            nullable: true
+                            type: integer
+                          samplingWindow:
+                            description: The sliding time window over which the success
+                              rate is calculated.
+                            type: string
+                          successCriteria:
+                            description: Criteria that classify an upstream response
+                              as a success for the purpose of the success-rate signal.
+                            properties:
+                              grpc:
+                                description: Success criteria for gRPC responses.
+                                properties:
+                                  statusCodes:
+                                    description: Canonical gRPC status names such
+                                      as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              http:
+                                description: Success criteria for HTTP responses.
+                                properties:
+                                  statusRanges:
+                                    description: The set of HTTP status ranges considered
+                                      successful.
+                                    items:
+                                      properties:
+                                        end:
+                                          description: Exclusive upper bound of the
+                                            range.
+                                          maximum: 600
+                                          minimum: 100
+                                          type: integer
+                                        start:
+                                          description: Inclusive lower bound of the
+                                            range.
+                                          maximum: 600
+                                          minimum: 100
+                                          type: integer
+                                      type: object
+                                    type: array
+                                type: object
+                            type: object
+                          threshold:
+                            description: The success rate, as a percentage, at or
+                              below which requests begin to be rejected.
+                            format: double
+                            nullable: true
+                            type: number
+                        type: object
+                    type: object
                   connectionPool:
                     properties:
                       http:
@@ -7427,6 +8395,94 @@ spec:
                     description: Traffic policies specific to individual ports.
                     items:
                       properties:
+                        admissionControl:
+                          description: Admission control based on the observed success
+                            rate of the upstream service, applied to this specific
+                            port.
+                          oneOf:
+                          - not:
+                              anyOf:
+                              - required:
+                                - successRate
+                          - required:
+                            - successRate
+                          properties:
+                            successRate:
+                              description: Shed load based on the observed success
+                                rate of the upstream service.
+                              properties:
+                                aggression:
+                                  description: Controls how aggressively requests
+                                    are shed as the success rate drops below `threshold`.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                maximumRejectionPercent:
+                                  description: The maximum percentage of requests
+                                    that may be shed, even as the success rate keeps
+                                    falling.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                                minimumAttemptRate:
+                                  description: The minimum average request rate (requests
+                                    per second) over the sampling window required
+                                    before any shedding occurs.
+                                  maximum: 4294967295
+                                  minimum: 0
+                                  nullable: true
+                                  type: integer
+                                samplingWindow:
+                                  description: The sliding time window over which
+                                    the success rate is calculated.
+                                  type: string
+                                successCriteria:
+                                  description: Criteria that classify an upstream
+                                    response as a success for the purpose of the success-rate
+                                    signal.
+                                  properties:
+                                    grpc:
+                                      description: Success criteria for gRPC responses.
+                                      properties:
+                                        statusCodes:
+                                          description: Canonical gRPC status names
+                                            such as `OK`, `NOT_FOUND`, or `UNAVAILABLE`.
+                                          items:
+                                            type: string
+                                          type: array
+                                      type: object
+                                    http:
+                                      description: Success criteria for HTTP responses.
+                                      properties:
+                                        statusRanges:
+                                          description: The set of HTTP status ranges
+                                            considered successful.
+                                          items:
+                                            properties:
+                                              end:
+                                                description: Exclusive upper bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                              start:
+                                                description: Inclusive lower bound
+                                                  of the range.
+                                                maximum: 600
+                                                minimum: 100
+                                                type: integer
+                                            type: object
+                                          type: array
+                                      type: object
+                                  type: object
+                                threshold:
+                                  description: The success rate, as a percentage,
+                                    at or below which requests begin to be rejected.
+                                  format: double
+                                  nullable: true
+                                  type: number
+                              type: object
+                          type: object
                         connectionPool:
                           properties:
                             http:

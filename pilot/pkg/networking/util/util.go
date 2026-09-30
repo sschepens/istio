@@ -954,6 +954,7 @@ func shadowCopyPortTrafficPolicy(portTrafficPolicy *networking.TrafficPolicy_Por
 	ret.LoadBalancer = portTrafficPolicy.LoadBalancer
 	ret.OutlierDetection = portTrafficPolicy.OutlierDetection
 	ret.Tls = portTrafficPolicy.Tls
+	ret.AdmissionControl = portTrafficPolicy.AdmissionControl
 	return ret
 }
 
