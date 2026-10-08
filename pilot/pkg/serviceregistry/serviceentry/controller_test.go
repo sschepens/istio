@@ -787,6 +787,83 @@ func TestServiceDiscoveryServiceInstancesForDnsRoundRobinLB(t *testing.T) {
 	expectServiceInstances(t, sd, otherNs, 0, otherNsExpected)
 }
 
+// Tests that DNSRoundRobinLB deduplication only applies to the published endpoints. The single endpoint
+// limit is a property of the outbound LOGICAL_DNS cluster; every workload backing the service still serves
+// it, so each keeps its ServiceTargets, including when the published endpoint changes.
+func TestDnsRoundRobinLBServiceTargetsIgnoreDeduplication(t *testing.T) {
+	t.Run("inline endpoints across service entries", func(t *testing.T) {
+		store, sd, _ := initServiceDiscovery(t)
+
+		se1 := ptr.Of(dnsRoundRobinLBSE1.DeepCopy())
+		se1.Spec.(*networking.ServiceEntry).Endpoints = []*networking.WorkloadEntry{{
+			Address: "1.1.1.1",
+			Ports:   map[string]uint32{"http-445": 444, "http-446": 445},
+		}}
+		se2 := ptr.Of(dnsRoundRobinLBSE2.DeepCopy())
+		se2.Spec.(*networking.ServiceEntry).Endpoints = []*networking.WorkloadEntry{{
+			Address: "2.2.2.2",
+			Ports:   map[string]uint32{"http-445": 444},
+		}}
+		se1Instances := []*WorkloadServiceInstance{
+			makeInstance(se1, "dns-round-robin-1-0", []string{"1.1.1.1"}, 444, se1.Spec.(*networking.ServiceEntry).Ports[0], map[string]string{}, PlainText),
+			makeInstance(se1, "dns-round-robin-1-0", []string{"1.1.1.1"}, 445, se1.Spec.(*networking.ServiceEntry).Ports[1], map[string]string{}, PlainText),
+		}
+		se2Instances := []*WorkloadServiceInstance{
+			makeInstance(se2, "dns-round-robin-2-0", []string{"2.2.2.2"}, 444, se2.Spec.(*networking.ServiceEntry).Ports[0], map[string]string{}, PlainText),
+		}
+
+		createConfigs([]*config.Config{se1}, store, t)
+		expectServiceInstances(t, sd, se1, 0, se1Instances)
+		createConfigs([]*config.Config{se2}, store, t)
+
+		// Only the first service entry's endpoints are published for the host...
+		expectServiceInstances(t, sd, se1, 0, se1Instances)
+		expectServiceInstances(t, sd, se2, 0, se1Instances)
+		// ...but the endpoint of the second still gets its own targets.
+		expectProxyInstances(t, sd, se1Instances, []string{"1.1.1.1"})
+		expectProxyInstances(t, sd, se2Instances, []string{"2.2.2.2"})
+
+		// Once the first service entry goes away the second one's endpoint is published, and its targets
+		// are left untouched.
+		deleteConfigs([]*config.Config{se1}, store, t)
+		expectServiceInstances(t, sd, se2, 0, se2Instances)
+		expectProxyInstances(t, sd, nil, []string{"1.1.1.1"})
+		expectProxyInstances(t, sd, se2Instances, []string{"2.2.2.2"})
+	})
+
+	t.Run("selected workloads", func(t *testing.T) {
+		store, sd, _ := initServiceDiscovery(t)
+
+		se := ptr.Of(selector.DeepCopy())
+		se.Spec.(*networking.ServiceEntry).Resolution = networking.ServiceEntry_DNS_ROUND_ROBIN
+		ports := se.Spec.(*networking.ServiceEntry).Ports
+		workload := func(name, address string) (*config.Config, []*WorkloadServiceInstance) {
+			wle := createWorkloadEntry(name, se.Namespace, &networking.WorkloadEntry{
+				Address:        address,
+				Labels:         map[string]string{"app": "wle"},
+				ServiceAccount: "default",
+			})
+			return wle, []*WorkloadServiceInstance{
+				makeInstanceWithServiceAccount(se, name, []string{address}, 444, ports[0], map[string]string{"app": "wle"}, "default"),
+				makeInstanceWithServiceAccount(se, name, []string{address}, 445, ports[1], map[string]string{"app": "wle"}, "default"),
+			}
+		}
+		// Instances are ordered by workload name, so wl-a is the one published for every port.
+		wlA, wlAInstances := workload("wl-a", "2.2.2.2")
+		wlB, wlBInstances := workload("wl-b", "3.3.3.3")
+
+		createConfigs([]*config.Config{se, wlA, wlB}, store, t)
+		expectServiceInstances(t, sd, se, 0, wlAInstances)
+		expectProxyInstances(t, sd, wlAInstances, []string{"2.2.2.2"})
+		expectProxyInstances(t, sd, wlBInstances, []string{"3.3.3.3"})
+
+		deleteConfigs([]*config.Config{wlA}, store, t)
+		expectServiceInstances(t, sd, se, 0, wlBInstances)
+		expectProxyInstances(t, sd, nil, []string{"2.2.2.2"})
+		expectProxyInstances(t, sd, wlBInstances, []string{"3.3.3.3"})
+	})
+}
+
 func TestEmptyWorkloadSelectorMatchesNoWorkloads(t *testing.T) {
 	store, sd, events := initServiceDiscovery(t)
 
