@@ -622,9 +622,7 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 	})
 }
 
-// Tests that when multiple service entries with "DNSRounbRobinLB" resolution type
-// are created with different/same endpoints, we only consider the first service because
-// Envoy's LogicalDNS type of cluster does not allow more than one locality LB Endpoint.
+// Tests that merging produces the same endpoint order regardless of the order instances come in.
 func TestMergeServiceInstancesDeterministic(t *testing.T) {
 	cfg := selector.DeepCopy()
 	cfg.Spec.(*networking.ServiceEntry).Addresses = []string{"10.0.0.1", "10.0.0.2"}
@@ -638,10 +636,10 @@ func TestMergeServiceInstancesDeterministic(t *testing.T) {
 		instances = append(instances, convertWorkloadInstanceToInstances(workload, service)...)
 	}
 	want := []string{
-		"selector/wl/2.2.2.2/http-445",
 		"selector/wl/2.2.2.2/tcp-444",
 		"selector/wl/2.2.2.2/http-445",
 		"selector/wl/2.2.2.2/tcp-444",
+		"selector/wl/2.2.2.2/http-445",
 	}
 	assert.Equal(t, len(instances), len(want))
 	// The index can return ports and service address variants in any order.
@@ -659,6 +657,37 @@ func TestMergeServiceInstancesDeterministic(t *testing.T) {
 	}
 }
 
+// Tests that a DNS round robin service keeps a Pod over a WorkloadEntry for the same port, whatever their
+// names, matching the ordering used before instances were derived per workload.
+func TestMergeServiceInstancesPrefersPods(t *testing.T) {
+	cfg := selector.DeepCopy()
+	cfg.Spec.(*networking.ServiceEntry).Resolution = networking.ServiceEntry_DNS_ROUND_ROBIN
+	service := convertServices(cfg, nil, false)[0]
+	pod := &model.WorkloadInstance{
+		Namespace: "selector",
+		Name:      "z-pod",
+		Kind:      model.PodKind,
+		Endpoint:  &model.IstioEndpoint{Addresses: []string{"2.2.2.2"}},
+	}
+	we := &model.WorkloadInstance{
+		Namespace: "selector",
+		Name:      "a-workload-entry",
+		Kind:      model.WorkloadEntryKind,
+		Endpoint:  &model.IstioEndpoint{Addresses: []string{"3.3.3.3"}},
+	}
+	instances := append(convertWorkloadInstanceToInstances(we, service), convertWorkloadInstanceToInstances(pod, service)...)
+	merged := mergeServiceInstances(instances)
+	assert.Equal(t, slices.Map(merged, func(i *model.IstioEndpoint) string {
+		return i.Key()
+	}), []string{
+		"selector/z-pod/2.2.2.2/tcp-444",
+		"selector/z-pod/2.2.2.2/http-445",
+	})
+}
+
+// Tests that when multiple service entries with "DNSRounbRobinLB" resolution type
+// are created with different/same endpoints, we only consider the first service because
+// Envoy's LogicalDNS type of cluster does not allow more than one locality LB Endpoint.
 func TestServiceDiscoveryServiceInstancesForDnsRoundRobinLB(t *testing.T) {
 	store, sd, events := initServiceDiscovery(t)
 
@@ -774,7 +803,7 @@ func TestEmptyWorkloadSelectorMatchesNoWorkloads(t *testing.T) {
 	createConfigs([]*config.Config{&se}, store, t)
 	expectEvents(t, events,
 		Event{Type: "service", ID: "selector.com", Namespace: se.Namespace},
-		Event{Type: "eds", ID: "selector.com", Namespace: se.Namespace},
+		// An empty selector matches no workloads, so the service has no endpoints and gets no EDS update.
 		Event{Type: "xds", ID: "selector.com"})
 
 	createConfigs([]*config.Config{wle}, store, t)
@@ -1938,6 +1967,53 @@ func TestServiceEntrySelectorChangeForcesProxyPush(t *testing.T) {
 	retry.UntilSuccessOrFail(t, func() error {
 		if got := len(sd.GetProxyServiceTargets(proxy)); got != 0 {
 			return fmt.Errorf("expected 0 service targets after the selector change, got %d", got)
+		}
+		return nil
+	}, retry.Timeout(5*time.Second))
+}
+
+// Changing a selected WorkloadEntry's address keeps its instance UIDs, so the instances are updated
+// rather than deleted and re-added. Its ServiceTargets still move from the old address to the new one,
+// so the proxies at both addresses must be pushed.
+func TestWorkloadEntryAddressChangeForcesProxyPush(t *testing.T) {
+	store, sd, events := initServiceDiscovery(t)
+
+	createConfigs([]*config.Config{selector}, store, t)
+	expectEvents(t, events,
+		Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
+		Event{Type: "xds", ID: "selector.com"})
+
+	wle := createWorkloadEntry("wl", selector.Name,
+		&networking.WorkloadEntry{
+			Address:        "2.2.2.2",
+			Labels:         map[string]string{"app": "wle"},
+			ServiceAccount: "default",
+		})
+	createConfigs([]*config.Config{wle}, store, t)
+	expectEvents(t, events,
+		Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace, EndpointCount: 2},
+		Event{Type: "proxy", ID: "2.2.2.2"})
+
+	moved := createWorkloadEntry("wl", selector.Name,
+		&networking.WorkloadEntry{
+			Address:        "3.3.3.3",
+			Labels:         map[string]string{"app": "wle"},
+			ServiceAccount: "default",
+		})
+	createConfigs([]*config.Config{moved}, store, t)
+	expectEvents(t, events,
+		Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace, EndpointCount: 2},
+		Event{Type: "proxy", ID: "2.2.2.2"},
+		Event{Type: "proxy", ID: "3.3.3.3"})
+
+	retry.UntilSuccessOrFail(t, func() error {
+		oldProxy := &model.Proxy{IPAddresses: []string{"2.2.2.2"}, Metadata: &model.NodeMetadata{}}
+		if got := len(sd.GetProxyServiceTargets(oldProxy)); got != 0 {
+			return fmt.Errorf("expected 0 service targets at the old address, got %d", got)
+		}
+		newProxy := &model.Proxy{IPAddresses: []string{"3.3.3.3"}, Metadata: &model.NodeMetadata{}}
+		if got := len(sd.GetProxyServiceTargets(newProxy)); got != 2 {
+			return fmt.Errorf("expected 2 service targets at the new address, got %d", got)
 		}
 		return nil
 	}, retry.Timeout(5*time.Second))

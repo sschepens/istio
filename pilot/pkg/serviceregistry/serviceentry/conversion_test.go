@@ -745,7 +745,9 @@ func makeInstance(cfg *config.Config, workloadName string, addresses []string, p
 			TargetPort: intstr.FromInt32(int32(svcPort.TargetPort)),
 		},
 	}
-	instance.UID = generateWorkloadServiceInstanceUID(instance)
+	instance.UID = workloadServiceInstanceUID(
+		workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), instance.Namespace, instance.Name, svc),
+		instance.ServicePort)
 	return instance
 }
 

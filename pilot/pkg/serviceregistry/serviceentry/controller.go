@@ -104,7 +104,6 @@ type Outputs struct {
 	// ServiceInstancesByNamespaceHost is a collection of instances keyed by namespace and hostname.
 	// Use cases:
 	// - as an input to EDS Updates
-	// - to force an XDS ConfigUpdate when a DNS service endpoint is modified.
 	ServiceInstancesByNamespaceHost krt.Collection[*EDSInstances]
 	// ServiceInstances is a collection of all service instances.
 	// Use cases:
@@ -168,7 +167,7 @@ func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool 
 type EDSInstances struct {
 	Namespace string
 	Host      string
-	Instances []*model.IstioEndpoint
+	Endpoints []*model.IstioEndpoint
 }
 
 func (e *EDSInstances) ResourceName() string {
@@ -180,7 +179,7 @@ func (e *EDSInstances) Equals(other *EDSInstances) bool {
 		return false
 	}
 
-	return slices.EqualFunc(e.Instances, other.Instances, func(a, b *model.IstioEndpoint) bool {
+	return slices.EqualFunc(e.Endpoints, other.Endpoints, func(a, b *model.IstioEndpoint) bool {
 		return a.Equals(b)
 	})
 }
@@ -372,7 +371,7 @@ func (s *Controller) buildCollections() {
 				return []*EDSInstances{{
 					Namespace: namespace,
 					Host:      hostname,
-					Instances: mergeServiceInstances(obj.Objects),
+					Endpoints: mergeServiceInstances(obj.Objects),
 				}}
 			},
 			s.opts.WithName("outputs/MergedServiceInstancesByNamespaceHost")...,
@@ -395,19 +394,18 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances
 	for _, e := range events {
 		obj := e.Latest()
 
-		// This handler operates independently from the service update mechanism, so the service may
-		// already be gone by the time we get here.
-		serviceExists := s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) != nil
-
 		if e.Event == controllers.EventDelete {
 			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, nil)
-		} else {
-			// If this handler gets delayed, we could end up re-creating EDS Shards for non-existing services.
-			if !serviceExists {
-				continue
-			}
-			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, obj.Instances)
+			continue
 		}
+
+		// This handler operates independently from the service update mechanism, so the service may
+		// already be gone by the time we get here. If this handler gets delayed, we could end up
+		// re-creating EDS Shards for non-existing services.
+		if s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) == nil {
+			continue
+		}
+		s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, obj.Endpoints)
 	}
 }
 
@@ -456,39 +454,49 @@ func (s *Controller) pushProxyUpdates(events []krt.Event[*WorkloadServiceInstanc
 	// A workload has one instance per service port, and may be selected by several ServiceEntries;
 	// collapse those into a single push per proxy.
 	pushed := sets.New[proxyKey]()
-	for _, e := range events {
-		// Updates carry no information the proxy doesn't already have (Service/ServicePort/Endpoint
-		// changes are pushed through other means); only Add (gained a match) and Delete (lost a match)
-		// require the workload's own proxy to recompute its ServiceTargets.
-		if e.Event == controllers.EventUpdate {
-			continue
+	push := func(key proxyKey) {
+		if key.address == "" || pushed.InsertContains(key) {
+			return
 		}
-
+		s.XdsUpdater.ProxyUpdate(key.cluster, key.address)
+	}
+	for _, e := range events {
 		si := e.Latest()
 		// skip service entry inline instances
 		if len(si.Service.Attributes.LabelSelectors) == 0 {
 			continue
 		}
 
-		if e.Event == controllers.EventDelete {
+		switch e.Event {
+		case controllers.EventUpdate:
+			// Other Service/ServicePort/Endpoint changes are pushed through other means. But the UID
+			// leaves out the address, so a workload that moves to another address is an update here,
+			// and its ServiceTargets move from the old proxy to the new one; both need to recompute.
+			oldKey, newKey := proxyKeyForEndpoint((*e.Old).Endpoint), proxyKeyForEndpoint((*e.New).Endpoint)
+			if oldKey == newKey {
+				continue
+			}
+			push(oldKey)
+			push(newKey)
+		case controllers.EventDelete:
 			external := s.inputs.ExternalWorkloads.GetKey(si.Namespace + "/" + si.Name)
 			we := s.inputs.WorkloadEntries.GetKey(si.Namespace + "/" + si.Name)
 			if external == nil && we == nil {
 				// this workload no longer exists, we don't need to update any proxy
 				continue
 			}
+			push(proxyKeyForEndpoint(si.Endpoint))
+		default:
+			push(proxyKeyForEndpoint(si.Endpoint))
 		}
+	}
+}
 
-		ep := si.Endpoint
-		key := proxyKey{
-			// ServiceEntry can select pods and WorkloadEntries from any cluster, use their own cluster ID.
-			cluster: ep.Locality.ClusterID,
-			address: ep.FirstAddressOrNil(),
-		}
-		if key.address == "" || pushed.InsertContains(key) {
-			continue
-		}
-		s.XdsUpdater.ProxyUpdate(key.cluster, key.address)
+func proxyKeyForEndpoint(ep *model.IstioEndpoint) proxyKey {
+	return proxyKey{
+		// ServiceEntry can select pods and WorkloadEntries from any cluster, use their own cluster ID.
+		cluster: ep.Locality.ClusterID,
+		address: ep.FirstAddressOrNil(),
 	}
 }
 
@@ -559,7 +567,7 @@ func (s *Controller) ResyncEDS() {
 	}
 
 	for _, io := range s.outputs.ServiceInstancesByNamespaceHost.List() {
-		s.XdsUpdater.EDSUpdate(s.shard, io.Host, io.Namespace, io.Instances)
+		s.XdsUpdater.EDSUpdate(s.shard, io.Host, io.Namespace, io.Endpoints)
 	}
 }
 
@@ -633,7 +641,6 @@ func (s *Controller) HasSynced() bool {
 
 	if !s.workloadEntryController {
 		if !s.outputs.Services.HasSynced() ||
-			!s.outputs.ServicesByNamespaceHost.HasSynced() ||
 			!s.outputs.ServiceInstances.HasSynced() ||
 			!s.outputs.ServiceInstancesByNamespaceHost.HasSynced() {
 			return false

@@ -353,7 +353,8 @@ func convertServiceEntryToInstances(
 
 	out := make([]*WorkloadServiceInstance, 0, len(serviceEntry.Ports)*endpointsNum)
 	if hostnameToServiceInstance {
-		uidPrefix := cfg.Namespace + "/" + cfg.Name + "/" + service.ResourceName() + "/"
+		// The endpoint comes from the ServiceEntry itself, like inline endpoints, which are WorkloadEntry kind.
+		uidPrefix := workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), cfg.Namespace, cfg.Name, service)
 		for _, servicePort := range service.Ports {
 			// Note: only convert the hostname to service instance if WorkloadSelector is not set
 			// when service entry has discovery type DNS and no endpoints.
@@ -382,7 +383,7 @@ func convertServiceEntryToInstances(
 				Service:     service,
 				ServicePort: servicePort,
 			}
-			instance.UID = uidPrefix + instance.Endpoint.Key() + "/" + strconv.Itoa(servicePort.Port)
+			instance.UID = workloadServiceInstanceUID(uidPrefix, servicePort)
 			out = append(out, instance)
 		}
 	} else {
@@ -422,7 +423,7 @@ func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance
 	if unixAddress {
 		addrs = []string{strings.TrimPrefix(addrs[0], model.UnixAddressPrefix)}
 	}
-	uidPrefix := workloadInstance.Namespace + "/" + workloadInstance.Name + "/" + service.ResourceName() + "/"
+	uidPrefix := workloadServiceInstanceUIDPrefix(workloadInstance.Kind.String(), workloadInstance.Namespace, workloadInstance.Name, service)
 	for _, servicePort := range service.Ports {
 		var targetPort uint32
 		// priority level: unixAddress > we.ports > se.port.targetPort > se.port.number
@@ -453,15 +454,25 @@ func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance
 			Service:     service,
 			ServicePort: servicePort,
 		}
-		instance.UID = uidPrefix + ep.Key() + "/" + strconv.Itoa(servicePort.Port)
+		instance.UID = workloadServiceInstanceUID(uidPrefix, servicePort)
 		out = append(out, instance)
 	}
 	return out
 }
 
-func generateWorkloadServiceInstanceUID(instance *WorkloadServiceInstance) string {
-	return instance.Namespace + "/" + instance.Name + "/" + instance.Service.ResourceName() + "/" +
-		instance.Endpoint.Key() + "/" + strconv.Itoa(instance.ServicePort.Port)
+// workloadServiceInstanceUIDPrefix returns the part of an instance UID shared by all ports of a workload
+// for a given service. The workload kind leads so that, after the service, merged instances order Pods
+// before WorkloadEntries; DNS round robin services keep only the first instance per port, so this
+// decides which one wins.
+// The endpoint is deliberately left out: a workload yields exactly one endpoint per service port, so it
+// adds nothing to uniqueness, and keeping the address out makes an address change an update of the
+// same instance rather than a delete and add.
+func workloadServiceInstanceUIDPrefix(kind, namespace, name string, service *model.Service) string {
+	return kind + "/" + namespace + "/" + name + "/" + service.ResourceName() + "/"
+}
+
+func workloadServiceInstanceUID(prefix string, servicePort *model.Port) string {
+	return prefix + strconv.Itoa(servicePort.Port)
 }
 
 func servicePortTargetPort(port *model.Port) uint32 {
