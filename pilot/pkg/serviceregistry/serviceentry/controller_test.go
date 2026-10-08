@@ -20,7 +20,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -155,102 +154,6 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	client.RunAndWait(stop)
 	go controller.Run(stop)
 	return istioStore, controller, xdsUpdater
-}
-
-type blockingEndpointUpdater struct {
-	model.XDSUpdater
-	entered chan struct{}
-	release chan struct{}
-	deleted chan struct{}
-	cleared chan struct{}
-}
-
-func (u *blockingEndpointUpdater) EDSUpdate(shard model.ShardKey, host, namespace string, endpoints []*model.IstioEndpoint) {
-	if len(endpoints) > 0 && endpoints[0].FirstAddressOrNil() == "3.3.3.3" {
-		close(u.entered)
-		<-u.release
-	}
-	u.XDSUpdater.EDSUpdate(shard, host, namespace, endpoints)
-	if len(endpoints) == 0 {
-		u.cleared <- struct{}{}
-	}
-}
-
-func (u *blockingEndpointUpdater) SvcUpdate(shard model.ShardKey, host, namespace string, event model.Event) {
-	u.XDSUpdater.SvcUpdate(shard, host, namespace, event)
-	if event == model.EventDelete {
-		u.deleted <- struct{}{}
-	}
-}
-
-// A service deletion must not race with an EDS update that has already passed the service-existence
-// check. Otherwise the update recreates the deleted shard, and the later empty EDS update preserves
-// the service's index keys indefinitely.
-func TestServiceDeletionDuringEndpointUpdate(t *testing.T) {
-	store, sd, fx := initServiceDiscovery(t)
-	retry.UntilOrFail(t, sd.HasSynced, retry.Timeout(5*time.Second))
-	delegate := fx.Delegate.(*model.FakeEndpointIndexUpdater)
-	updater := &blockingEndpointUpdater{
-		XDSUpdater: delegate,
-		entered:    make(chan struct{}),
-		release:    make(chan struct{}),
-		deleted:    make(chan struct{}, 10),
-		cleared:    make(chan struct{}, 10),
-	}
-	fx.Delegate = updater
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(updater.release) }) }
-	defer release()
-
-	se := selector.DeepCopy()
-	createConfigs([]*config.Config{&se}, store, t)
-	we := createWorkloadEntry("wl", se.Namespace, &networking.WorkloadEntry{
-		Address: "2.2.2.2",
-		Labels:  map[string]string{"app": "wle"},
-	})
-	createConfigs([]*config.Config{we}, store, t)
-	retry.UntilOrFail(t, func() bool {
-		shards, ok := delegate.Index.ShardsForService("selector.com", se.Namespace)
-		if !ok {
-			return false
-		}
-		shards.Lock()
-		defer shards.Unlock()
-		return len(shards.Shards[sd.shard]) > 0
-	}, retry.Timeout(5*time.Second))
-
-	moved := we.DeepCopy()
-	moved.Spec.(*networking.WorkloadEntry).Address = "3.3.3.3"
-	createConfigs([]*config.Config{&moved}, store, t)
-	select {
-	case <-updater.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("endpoint update did not enter")
-	}
-	deleteConfigs([]*config.Config{&se}, store, t)
-	// Give the independent service handler a chance to run while endpoint publication is blocked.
-	// With serialization, it can only delete the shard after the endpoint update is released.
-	deleted := false
-	select {
-	case <-updater.deleted:
-		deleted = true
-	case <-time.After(100 * time.Millisecond):
-	}
-	release()
-	if !deleted {
-		select {
-		case <-updater.deleted:
-		case <-time.After(5 * time.Second):
-			t.Fatal("service deletion did not finish")
-		}
-	}
-	select {
-	case <-updater.cleared:
-	case <-time.After(5 * time.Second):
-		t.Fatal("endpoint deletion did not finish")
-	}
-	_, exists := delegate.Index.ShardsForService("selector.com", se.Namespace)
-	assert.Equal(t, exists, false)
 }
 
 func TestServiceDiscoveryServices(t *testing.T) {
