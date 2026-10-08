@@ -322,7 +322,7 @@ func (s *Controller) buildCollections() {
 
 		allServices := krt.MapCollection(servicesWithInstances, func(swi ServiceWithInstances) *model.Service {
 			return swi.Service
-		}, s.opts.WithName("outputs/AllServices")...)
+		}, append(s.opts.WithName("outputs/AllServices"), krt.WithMapDiscardEqual())...)
 
 		allWorkloads := krt.JoinCollection(
 			[]krt.Collection[*model.WorkloadInstance]{
