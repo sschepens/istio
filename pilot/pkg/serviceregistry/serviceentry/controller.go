@@ -569,25 +569,6 @@ func (s *Controller) GetService(hostname host.Name) *model.Service {
 	return res[0]
 }
 
-// ResyncEDS will do a full EDS update. This is needed for some tests where we have many configs loaded without calling
-// the config handlers.
-// This should probably not be used in production code.
-func (s *Controller) ResyncEDS() {
-	if s.workloadEntryController {
-		return
-	}
-
-	s.pushMutex.Lock()
-	defer s.pushMutex.Unlock()
-
-	for _, io := range s.outputs.ServiceInstancesByNamespaceHost.List() {
-		if s.outputs.ServicesByNamespaceHost.GetKey(io.Namespace+"/"+io.Host) == nil {
-			continue
-		}
-		s.XdsUpdater.EDSUpdate(s.shard, io.Host, io.Namespace, io.Endpoints)
-	}
-}
-
 // GetProxyServiceTargets lists service targets co-located with a given proxy
 // NOTE: The service objects in these instances do not have the auto allocated IP set.
 func (s *Controller) GetProxyServiceTargets(node *model.Proxy) []model.ServiceTarget {
