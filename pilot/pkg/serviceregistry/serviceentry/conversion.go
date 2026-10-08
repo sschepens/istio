@@ -552,8 +552,8 @@ func services(
 	networkIDFn networkIDCallback,
 	canonicalServiceForMeshExternal bool,
 	opts krt.OptionsBuilder,
-) krt.Collection[ServiceWithInstances] {
-	return krt.NewManyCollection(serviceEntries, func(ctx krt.HandlerContext, cfg config.Config) []ServiceWithInstances {
+) krt.Collection[*ServiceWithInstances] {
+	return krt.NewManyCollection(serviceEntries, func(ctx krt.HandlerContext, cfg config.Config) []*ServiceWithInstances {
 		se := cfg.Spec.(*networking.ServiceEntry)
 		namespace := krt.FetchOne(ctx, namespaces, krt.FilterKey(cfg.Namespace))
 		var namespaceAnnotations map[string]string
@@ -575,21 +575,21 @@ func services(
 		}
 
 		if se.WorkloadSelector != nil {
-			return slices.Map(services, func(ss *model.Service) ServiceWithInstances {
-				return ServiceWithInstances{
+			return slices.Map(services, func(ss *model.Service) *ServiceWithInstances {
+				return &ServiceWithInstances{
 					Service: ss,
 				}
 			})
 		}
 
 		// No selector: endpoints from SE directly
-		return slices.Map(services, func(ss *model.Service) ServiceWithInstances {
-			return ServiceWithInstances{
+		return slices.Map(services, func(ss *model.Service) *ServiceWithInstances {
+			return &ServiceWithInstances{
 				Service:   ss,
 				Instances: convertServiceEntryToInstances(ctx, cfg, ss, meshConfig, clusterID, networkIDFn),
 			}
 		})
-	}, opts.WithName("ServicesWithInstances")...)
+	}, opts.WithName("outputs/ServicesWithInstances")...)
 }
 
 func serviceInstances(

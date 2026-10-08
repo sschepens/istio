@@ -657,6 +657,40 @@ func TestMergeServiceInstancesDeterministic(t *testing.T) {
 	}
 }
 
+// Tests that a DNS round robin service yields a port to an older service with the same host, even one of
+// another resolution, and that this does not depend on the order instances come in.
+func TestMergeServiceInstancesDNSRoundRobinYieldsToOlderService(t *testing.T) {
+	instance := func(name string, resolution networking.ServiceEntry_Resolution, created time.Time, address string) *WorkloadServiceInstance {
+		cfg := config.Config{
+			Meta: config.Meta{GroupVersionKind: gvk.ServiceEntry, Name: name, Namespace: "ns", CreationTimestamp: created},
+			Spec: &networking.ServiceEntry{
+				Hosts:            []string{"h.example.com"},
+				Ports:            []*networking.ServicePort{{Number: 80, Name: "http", Protocol: "HTTP"}},
+				Resolution:       resolution,
+				WorkloadSelector: &networking.WorkloadSelector{Labels: map[string]string{"app": "a"}},
+			},
+		}
+		wi := &model.WorkloadInstance{
+			Namespace: "ns",
+			Name:      name + "-wl",
+			Kind:      model.WorkloadEntryKind,
+			Endpoint:  &model.IstioEndpoint{Addresses: []string{address}},
+		}
+		return convertWorkloadInstanceToInstances(wi, convertServices(cfg, nil, false)[0])[0]
+	}
+	now := time.Now()
+	// The younger round robin service sorts first by name, so its precedence must come from creation time.
+	roundRobin := instance("a-round-robin", networking.ServiceEntry_DNS_ROUND_ROBIN, now.Add(time.Hour), "2.2.2.2")
+	static := instance("b-static", networking.ServiceEntry_STATIC, now, "1.1.1.1")
+
+	for _, input := range [][]*WorkloadServiceInstance{{roundRobin, static}, {static, roundRobin}} {
+		merged := mergeServiceInstances(input)
+		assert.Equal(t, slices.Map(merged, func(ep *model.IstioEndpoint) string {
+			return ep.FirstAddressOrNil()
+		}), []string{"1.1.1.1"})
+	}
+}
+
 // Tests that a DNS round robin service keeps a Pod over a WorkloadEntry for the same port, whatever their
 // names, matching the ordering used before instances were derived per workload.
 func TestMergeServiceInstancesPrefersPods(t *testing.T) {

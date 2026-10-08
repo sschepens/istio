@@ -127,11 +127,11 @@ type ServiceWithInstances struct {
 	Instances []*WorkloadServiceInstance
 }
 
-func (swi ServiceWithInstances) ResourceName() string {
+func (swi *ServiceWithInstances) ResourceName() string {
 	return swi.Service.ResourceName()
 }
 
-func (swi ServiceWithInstances) Equals(other ServiceWithInstances) bool {
+func (swi *ServiceWithInstances) Equals(other *ServiceWithInstances) bool {
 	if !swi.Service.Equals(other.Service) {
 		return false
 	}
@@ -294,14 +294,13 @@ func newController(
 }
 
 func (s *Controller) buildCollections() {
-	wleWorkloads := krt.NewCollection(s.inputs.WorkloadEntries, func(ctx krt.HandlerContext, cfg config.Config) **model.WorkloadInstance {
+	wleWorkloads := krt.NewPointerCollection(s.inputs.WorkloadEntries, func(ctx krt.HandlerContext, cfg config.Config) *model.WorkloadInstance {
 		if features.WorkloadEntryHealthChecks && !isHealthy(cfg) {
 			return nil
 		}
 
 		we := ConvertWorkloadEntry(cfg)
-		wi := convertWorkloadEntryToWorkloadInstance(ctx, we, cfg.Meta, s.inputs.MeshConfig, cfg.Namespace, s.clusterID, s.networkIDCallback)
-		return &wi
+		return convertWorkloadEntryToWorkloadInstance(ctx, we, cfg.Meta, s.inputs.MeshConfig, cfg.Namespace, s.clusterID, s.networkIDCallback)
 	}, s.opts.WithName("outputs/WorkloadsFromWLE")...)
 
 	if !s.workloadEntryController {
@@ -324,7 +323,7 @@ func (s *Controller) buildCollections() {
 			s.opts,
 		)
 
-		allServices := krt.MapCollection(servicesWithInstances, func(swi ServiceWithInstances) *model.Service {
+		allServices := krt.MapCollection(servicesWithInstances, func(swi *ServiceWithInstances) *model.Service {
 			return swi.Service
 		}, append(s.opts.WithName("outputs/AllServices"), krt.WithMapDiscardEqual())...)
 
@@ -350,7 +349,7 @@ func (s *Controller) buildCollections() {
 			return []string{svc.Attributes.Namespace + "/" + string(svc.Hostname)}
 		})
 
-		serviceEntryInstances := krt.NewManyCollection(servicesWithInstances, func(ctx krt.HandlerContext, swi ServiceWithInstances) []*WorkloadServiceInstance {
+		serviceEntryInstances := krt.NewManyCollection(servicesWithInstances, func(ctx krt.HandlerContext, swi *ServiceWithInstances) []*WorkloadServiceInstance {
 			// services with a workload selector have nil instances, so we only collect inline service entry instances
 			return swi.Instances
 		}, s.opts.WithName("outputs/ServiceEntryInstances")...)
@@ -366,26 +365,26 @@ func (s *Controller) buildCollections() {
 
 		instancesByNsHost := krt.NewIndex(allInstances, "namespaceHost", func(si *WorkloadServiceInstance) []string {
 			return []string{si.Service.Attributes.Namespace + "/" + string(si.Service.Hostname)}
-		}).AsCollection(s.opts.WithName("ServiceInstancesByNamespaceHost")...)
+		}).AsCollection(s.opts.WithName("outputs/InstancesByNamespaceHost")...)
 
-		mergedInstancesByNamespaceHost := krt.NewManyCollection(
+		mergedInstancesByNamespaceHost := krt.NewPointerCollection(
 			instancesByNsHost,
-			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) []*EDSInstances {
+			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) *EDSInstances {
 				namespace, hostname, _ := strings.Cut(obj.Key, "/")
 
-				return []*EDSInstances{{
+				return &EDSInstances{
 					Namespace: namespace,
 					Host:      hostname,
 					Endpoints: mergeServiceInstances(obj.Objects),
-				}}
+				}
 			},
-			s.opts.WithName("outputs/MergedServiceInstancesByNamespaceHost")...,
+			s.opts.WithName("outputs/ServiceInstancesByNamespaceHost")...,
 		)
 
 		s.outputs = Outputs{
 			Services:                        allServices,
 			ServicesByHost:                  servicesByHost,
-			ServicesByNamespaceHost:         servicesByNamespaceHost.AsCollection(s.opts.WithName("outputs/ServiceByNamespaceHost")...),
+			ServicesByNamespaceHost:         servicesByNamespaceHost.AsCollection(s.opts.WithName("outputs/ServicesByNamespaceHost")...),
 			ServiceInstancesByNamespaceHost: mergedInstancesByNamespaceHost,
 			ServiceInstances:                allInstances,
 			ServiceInstancesByIP:            instancesByIP,
@@ -680,19 +679,31 @@ func compareServices(i, j *model.Service) int {
 }
 
 func mergeServiceInstances(instances []*WorkloadServiceInstance) []*model.IstioEndpoint {
-	ports := sets.New[int]()
+	if !slices.ContainsFunc(instances, func(w *WorkloadServiceInstance) bool {
+		return w.Service.Resolution == model.DNSRoundRobinLB
+	}) {
+		// UIDs are unique and include the service, so they give a total, stable order on their own.
+		slices.SortFunc(instances, func(a, b *WorkloadServiceInstance) int {
+			return strings.Compare(a.UID, b.UID)
+		})
+		return slices.Map(instances, func(w *WorkloadServiceInstance) *model.IstioEndpoint {
+			return w.Endpoint
+		})
+	}
+
+	// LOGICAL_DNS clusters accept a single endpoint, so the oldest service owns each port and a DNS
+	// round robin service only publishes its first instance on a port nobody claimed before it.
 	slices.SortFunc(instances, func(a, b *WorkloadServiceInstance) int {
 		if r := compareServices(a.Service, b.Service); r != 0 {
 			return r
 		}
 		return strings.Compare(a.UID, b.UID)
 	})
+	ports := sets.New[int]()
 	res := make([]*model.IstioEndpoint, 0, len(instances))
 	for _, w := range instances {
-		if w.Service.Resolution == model.DNSRoundRobinLB {
-			if ports.Contains(w.ServicePort.Port) {
-				continue
-			}
+		if w.Service.Resolution == model.DNSRoundRobinLB && ports.Contains(w.ServicePort.Port) {
+			continue
 		}
 		ports.Insert(w.ServicePort.Port)
 		res = append(res, w.Endpoint)
