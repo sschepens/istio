@@ -16,6 +16,7 @@ package serviceentry
 
 import (
 	"strings"
+	"sync"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -55,6 +56,10 @@ type Controller struct {
 
 	clusterID cluster.ID
 	shard     model.ShardKey
+
+	// Serialize endpoint publication with service shard deletion so an in-flight EDS update cannot
+	// recreate a shard after the service handler has deleted it.
+	pushMutex sync.Mutex
 
 	domainSuffix string
 
@@ -391,6 +396,9 @@ func (s *Controller) buildCollections() {
 }
 
 func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances]) {
+	s.pushMutex.Lock()
+	defer s.pushMutex.Unlock()
+
 	for _, e := range events {
 		obj := e.Latest()
 
@@ -410,6 +418,9 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances
 }
 
 func (s *Controller) pushServiceUpdates(events []krt.Event[*model.Service]) {
+	s.pushMutex.Lock()
+	defer s.pushMutex.Unlock()
+
 	configsUpdated := sets.New[model.ConfigKey]()
 	for _, e := range events {
 		svc := e.Latest()
@@ -566,7 +577,13 @@ func (s *Controller) ResyncEDS() {
 		return
 	}
 
+	s.pushMutex.Lock()
+	defer s.pushMutex.Unlock()
+
 	for _, io := range s.outputs.ServiceInstancesByNamespaceHost.List() {
+		if s.outputs.ServicesByNamespaceHost.GetKey(io.Namespace+"/"+io.Host) == nil {
+			continue
+		}
 		s.XdsUpdater.EDSUpdate(s.shard, io.Host, io.Namespace, io.Endpoints)
 	}
 }
