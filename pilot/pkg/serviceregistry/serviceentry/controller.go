@@ -412,7 +412,8 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances
 		if s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) == nil {
 			continue
 		}
-		s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, obj.Endpoints)
+		// krt only emits this event when an endpoint changed, so the EndpointIndex need not diff them again.
+		s.XdsUpdater.EDSReplace(s.shard, obj.Host, obj.Namespace, obj.Endpoints)
 	}
 }
 

@@ -306,6 +306,31 @@ func (e *EndpointIndex) UpdateServiceEndpoints(
 	istioEndpoints []*IstioEndpoint,
 	logPushType bool,
 ) PushType {
+	return e.updateServiceEndpoints(shard, hostname, namespace, istioEndpoints, logPushType, true)
+}
+
+// ReplaceServiceEndpoints is UpdateServiceEndpoints for callers that only publish endpoints when they
+// changed, such as krt collections, which already compare every endpoint. It skips the per-endpoint diff
+// and always pushes, but still tracks ServiceAccounts and DNS endpoints, which can require a full push.
+// Unlike UpdateServiceEndpoints, adding only endpoints that are not ready still triggers a push.
+func (e *EndpointIndex) ReplaceServiceEndpoints(
+	shard ShardKey,
+	hostname string,
+	namespace string,
+	istioEndpoints []*IstioEndpoint,
+	logPushType bool,
+) PushType {
+	return e.updateServiceEndpoints(shard, hostname, namespace, istioEndpoints, logPushType, false)
+}
+
+func (e *EndpointIndex) updateServiceEndpoints(
+	shard ShardKey,
+	hostname string,
+	namespace string,
+	istioEndpoints []*IstioEndpoint,
+	logPushType bool,
+	diff bool,
+) PushType {
 	if len(istioEndpoints) == 0 {
 		// Should delete the service EndpointShards when endpoints become zero to prevent memory leak,
 		// but we should not delete the keys from EndpointIndex map - that will trigger
@@ -341,7 +366,12 @@ func (e *EndpointIndex) UpdateServiceEndpoints(
 	ep.Lock()
 	defer ep.Unlock()
 	oldIstioEndpoints := ep.Shards[shard]
-	newIstioEndpoints, needPush, dnsEndpoints := endpointUpdateRequiresPush(oldIstioEndpoints, istioEndpoints)
+	newIstioEndpoints, needPush, dnsEndpoints := istioEndpoints, true, false
+	if diff {
+		newIstioEndpoints, needPush, dnsEndpoints = endpointUpdateRequiresPush(oldIstioEndpoints, istioEndpoints)
+	} else {
+		dnsEndpoints = anyDNSEndpoint(oldIstioEndpoints) || anyDNSEndpoint(istioEndpoints)
+	}
 
 	if !needPush {
 		log.Debugf("No push, either old endpoint health status did not change or new endpoint came with unhealthy status, %v", hostname)
