@@ -368,9 +368,6 @@ func convertServiceEntryToInstances(
 					},
 					Namespace:    cfg.Namespace,
 					WorkloadName: cfg.Name,
-					// This branch only runs for DNS services (see hostnameToServiceInstance above), where
-					// the endpoint is the service hostname itself.
-					DNSEndpoint: true,
 				},
 				Service:     service,
 				ServicePort: servicePort,
@@ -408,7 +405,6 @@ func getTLSModeFromWorkloadEntry(wle *networking.WorkloadEntry) string {
 // The workload instance has no service or service-port association, so create one instance per service port.
 func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance, service *model.Service) []*WorkloadServiceInstance {
 	out := make([]*WorkloadServiceInstance, 0, len(service.Ports))
-	dnsService := isDNSTypeService(service)
 	// unix addresses can only happen on workload entries which have only one address
 	addrs := workloadInstance.Endpoint.Addresses
 	unixAddress := len(addrs) == 1 && strings.HasPrefix(addrs[0], model.UnixAddressPrefix)
@@ -431,7 +427,6 @@ func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance
 		ep.LegacyClusterPortKey = servicePort.Port
 		ep.Addresses = addrs
 		ep.EndpointPort = targetPort
-		ep.DNSEndpoint = dnsService
 		if ep.Namespace == "" {
 			ep.Namespace = workloadInstance.Namespace
 		}
