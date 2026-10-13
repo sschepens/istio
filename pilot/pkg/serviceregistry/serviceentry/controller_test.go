@@ -175,6 +175,8 @@ func TestServiceDiscoveryServices(t *testing.T) {
 		Event{Type: "xds", ID: "*.google.com"},
 		Event{Type: "service", ID: "*.google.com", Namespace: httpDNS.Namespace},
 		Event{Type: "eds", ID: "*.google.com", Namespace: httpDNS.Namespace},
+		// DNS endpoints are inlined into the cluster, so publishing them requests a push of their own.
+		Event{Type: "xds", ID: "*.google.com"},
 	)
 	createConfigs([]*config.Config{httpDNSRR}, store, t)
 	expectEvents(
@@ -182,6 +184,7 @@ func TestServiceDiscoveryServices(t *testing.T) {
 		Event{Type: "xds", ID: "*.istio.io"},
 		Event{Type: "service", ID: "*.istio.io", Namespace: httpDNSRR.Namespace},
 		Event{Type: "eds", ID: "*.istio.io", Namespace: httpDNSRR.Namespace},
+		Event{Type: "xds", ID: "*.istio.io"},
 	)
 	createConfigs([]*config.Config{tcpStatic}, store, t)
 	expectEvents(
@@ -574,12 +577,14 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 		expectEvents(t, events,
 			Event{Type: "service", ID: "tcpdns.com", Namespace: tcpDNS.Namespace},
 			Event{Type: "eds", ID: "tcpdns.com", Namespace: tcpDNS.Namespace},
-			Event{Type: "xds", ID: "tcpdns.com"}) // service added
+			Event{Type: "xds", ID: "tcpdns.com"}, // service added
+			Event{Type: "xds", ID: "tcpdns.com"}) // DNS endpoints published
 
 		// now update the config
 		createConfigs([]*config.Config{tcpDNSUpdated}, store, t)
 		expectEvents(
 			t, events,
+			Event{Type: "xds", ID: "tcpdns.com"},
 			Event{Type: "eds", ID: "tcpdns.com"},
 		) // service deleted
 		expectServiceInstances(t, sd, tcpDNS, 0, instances2)
@@ -649,7 +654,7 @@ func TestMergeServiceInstancesDeterministic(t *testing.T) {
 			if reverse {
 				slices.Reverse(input)
 			}
-			merged := mergeServiceInstances(input)
+			merged, _ := mergeServiceInstances(input)
 			assert.Equal(t, slices.Map(merged, func(i *model.IstioEndpoint) string {
 				return i.Key()
 			}), want)
@@ -684,7 +689,7 @@ func TestMergeServiceInstancesDNSRoundRobinYieldsToOlderService(t *testing.T) {
 	static := instance("b-static", networking.ServiceEntry_STATIC, now, "1.1.1.1")
 
 	for _, input := range [][]*WorkloadServiceInstance{{roundRobin, static}, {static, roundRobin}} {
-		merged := mergeServiceInstances(input)
+		merged, _ := mergeServiceInstances(input)
 		assert.Equal(t, slices.Map(merged, func(ep *model.IstioEndpoint) string {
 			return ep.FirstAddressOrNil()
 		}), []string{"1.1.1.1"})
@@ -710,7 +715,7 @@ func TestMergeServiceInstancesPrefersPods(t *testing.T) {
 		Endpoint:  &model.IstioEndpoint{Addresses: []string{"3.3.3.3"}},
 	}
 	instances := append(convertWorkloadInstanceToInstances(we, service), convertWorkloadInstanceToInstances(pod, service)...)
-	merged := mergeServiceInstances(instances)
+	merged, _ := mergeServiceInstances(instances)
 	assert.Equal(t, slices.Map(merged, func(i *model.IstioEndpoint) string {
 		return i.Key()
 	}), []string{
@@ -758,6 +763,7 @@ func TestServiceDiscoveryServiceInstancesForDnsRoundRobinLB(t *testing.T) {
 		Event{Type: "service", ID: "example.com", Namespace: se1.Namespace},
 		Event{Type: "eds", ID: "example.com", Namespace: se1.Namespace, EndpointCount: len(expectedPrimary)},
 		Event{Type: "xds", ID: se1.Spec.(*networking.ServiceEntry).Hosts[0]},
+		Event{Type: "xds", ID: se1.Spec.(*networking.ServiceEntry).Hosts[0]}, // DNS endpoints published
 	)
 
 	createConfigs([]*config.Config{seMulti}, store, t)
@@ -770,6 +776,7 @@ func TestServiceDiscoveryServiceInstancesForDnsRoundRobinLB(t *testing.T) {
 		Event{Type: "service", ID: "muladdrs.example.com", Namespace: seMulti.Namespace},
 		Event{Type: "eds", ID: "muladdrs.example.com", Namespace: seMulti.Namespace, EndpointCount: len(expectedMul)},
 		Event{Type: "xds", ID: seMulti.Spec.(*networking.ServiceEntry).Hosts[0]},
+		Event{Type: "xds", ID: seMulti.Spec.(*networking.ServiceEntry).Hosts[0]}, // DNS endpoints published
 	)
 
 	otherNs := ptr.Of(dnsRoundRobinLBSE1.DeepCopy())
@@ -796,6 +803,7 @@ func TestServiceDiscoveryServiceInstancesForDnsRoundRobinLB(t *testing.T) {
 		Event{Type: "service", ID: "example.com", Namespace: otherNs.Namespace},
 		Event{Type: "eds", ID: "example.com", Namespace: otherNs.Namespace, EndpointCount: len(otherNsExpected)},
 		Event{Type: "xds", ID: otherNs.Spec.(*networking.ServiceEntry).Hosts[0]},
+		Event{Type: "xds", ID: otherNs.Spec.(*networking.ServiceEntry).Hosts[0]}, // DNS endpoints published
 	)
 
 	se2 := ptr.Of(dnsRoundRobinLBSE2.DeepCopy())
@@ -1073,6 +1081,7 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
+			Event{Type: "xds", ID: "dns.selector.com"},
 			// cannot void proxy update for dns workload
 			Event{Type: "proxy", ID: "4.4.4.4"},
 		)
@@ -1200,10 +1209,11 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 			Event{Type: "xds", ID: "selector.com"},
 		)
 		deleteConfigs([]*config.Config{dnsWle}, store, t)
-		// no xds event since dnsWle contains an IP address
+		// DNS endpoints are inlined into the cluster, so losing the last one still has to regenerate it.
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace},
+			Event{Type: "xds", ID: "dns.selector.com"},
 		)
 		deleteConfigs([]*config.Config{dnsSelector}, store, t)
 		expectEvents(
@@ -1350,11 +1360,7 @@ func TestServiceDiscoveryWorkloadChangeLabel(t *testing.T) {
 	})
 }
 
-// Workload instances fed in from other registries must produce endpoints for a DNS ServiceEntry,
-// flagged as DNS so that EndpointIndex.UpdateServiceEndpoints knows to regenerate the cluster rather
-// than pushing endpoints alone. The push itself is decided there and covered by its own tests; this
-// verifies the endpoints this controller hands over.
-func TestWorkloadInstanceDNSServiceEntry(t *testing.T) {
+func TestWorkloadInstanceFullPush(t *testing.T) {
 	store, sd, events := initServiceDiscovery(t)
 
 	// Setup a WorkloadEntry with selector the same as ServiceEntry
@@ -1423,15 +1429,15 @@ func TestWorkloadInstanceDNSServiceEntry(t *testing.T) {
 		}
 		expectProxyInstances(t, sd, instances, []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
-		expectDNSEndpoints(t, sd, selectorDNS)
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace},
+			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "postman-echo.com"},
 		)
 	})
 
-	t.Run("new instance", func(t *testing.T) {
+	t.Run("full push for new instance", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fi1}, sd, model.EventAdd, t)
 		instances := []*WorkloadServiceInstance{
 			makeInstanceWithServiceAccount(selectorDNS, "additional-name", []string{"4.4.4.4"}, 444,
@@ -1447,27 +1453,29 @@ func TestWorkloadInstanceDNSServiceEntry(t *testing.T) {
 		expectProxyInstances(t, sd, instances[:2], []string{"4.4.4.4"})
 		expectProxyInstances(t, sd, instances[2:], []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
-		expectDNSEndpoints(t, sd, selectorDNS)
 		expectEvents(t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)},
+			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "4.4.4.4"})
 	})
 
-	t.Run("another new workload instance", func(t *testing.T) {
+	t.Run("full push for another new workload instance", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fi2}, sd, model.EventAdd, t)
 		expectEvents(t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: 6},
+			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "2.2.2.2"})
 	})
 
-	t.Run("new instance with multiple addresses", func(t *testing.T) {
+	t.Run("full push for new instance with multiple addresses", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fiwithmulAddrs}, sd, model.EventAdd, t)
 		expectEvents(t, events,
 			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: 8},
+			Event{Type: "xds", ID: "selector.com"},
 			Event{Type: "proxy", ID: "3.3.3.3"})
 	})
 
-	t.Run("delete workload instance", func(t *testing.T) {
+	t.Run("full push on delete workload instance", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fi1}, sd, model.EventDelete, t)
 		instances := []*WorkloadServiceInstance{
 			makeInstanceWithServiceAccount(selectorDNS, "another-name", []string{"2.2.2.2"}, 444,
@@ -1488,13 +1496,13 @@ func TestWorkloadInstanceDNSServiceEntry(t *testing.T) {
 		expectProxyInstances(t, sd, instances[2:4], []string{"3.3.3.3", "2001:1::1"})
 		expectProxyInstances(t, sd, instances[4:], []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
-		expectDNSEndpoints(t, sd, selectorDNS)
 
 		expectEvents(t, events,
-			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)})
+			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)},
+			Event{Type: "xds", ID: "selector.com"})
 	})
 
-	t.Run("delete workload instance with multiple addresses", func(t *testing.T) {
+	t.Run("full push on delete workload instance with multiple addresses", func(t *testing.T) {
 		callInstanceHandlers([]*model.WorkloadInstance{fiwithmulAddrs}, sd, model.EventDelete, t)
 		instances := []*WorkloadServiceInstance{
 			makeInstanceWithServiceAccount(selectorDNS, "another-name", []string{"2.2.2.2"}, 444,
@@ -1510,10 +1518,10 @@ func TestWorkloadInstanceDNSServiceEntry(t *testing.T) {
 		expectProxyInstances(t, sd, instances[:2], []string{"2.2.2.2"})
 		expectProxyInstances(t, sd, instances[2:], []string{"postman-echo.com"})
 		expectServiceInstances(t, sd, selectorDNS, 0, instances)
-		expectDNSEndpoints(t, sd, selectorDNS)
 
 		expectEvents(t, events,
-			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)})
+			Event{Type: "eds", ID: "selector.com", Namespace: selectorDNS.Namespace, EndpointCount: len(instances)},
+			Event{Type: "xds", ID: "selector.com"})
 	})
 }
 
@@ -1730,6 +1738,7 @@ func TestServiceDiscoveryWorkloadInstance(t *testing.T) {
 		expectEvents(
 			t, events,
 			Event{Type: "eds", ID: "dns.selector.com", Namespace: dnsSelector.Namespace, EndpointCount: 2},
+			Event{Type: "xds", ID: "dns.selector.com"},
 			Event{Type: "proxy", ID: "2.2.2.2"},
 		)
 	})
@@ -2216,28 +2225,6 @@ func expectProxyTargets(t testing.TB, sd *Controller, expected []model.ServiceTa
 func expectEvents(t testing.TB, ch *xdsfake.Updater, events ...Event) {
 	t.Helper()
 	ch.StrictMatchOrFail(t, events...)
-}
-
-// expectDNSEndpoints asserts every endpoint the given config contributes to the registry is marked as
-// backing a DNS resolving service. EndpointIndex.UpdateServiceEndpoints keys its push type off this,
-// so losing the flag would silently downgrade a DNS service to endpoint-only pushes.
-func expectDNSEndpoints(t testing.TB, sd *Controller, cfg *config.Config) {
-	t.Helper()
-	index := sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index
-	retry.UntilSuccessOrFail(t, func() error {
-		for _, svc := range convertServices(*cfg, nil, false) {
-			endpoints := GetEndpointsForPort(svc, index, 0)
-			if len(endpoints) == 0 {
-				return fmt.Errorf("no endpoints registered for %v", svc.Hostname)
-			}
-			for _, ep := range endpoints {
-				if !ep.DNSEndpoint {
-					return fmt.Errorf("endpoint %v of DNS service %v is not marked as a DNS endpoint", ep.Key(), svc.Hostname)
-				}
-			}
-		}
-		return nil
-	}, retry.Converge(2), retry.Timeout(time.Second*1))
 }
 
 func expectServiceInstances(t testing.TB, sd *Controller, cfg *config.Config, port int, expected ...[]*WorkloadServiceInstance) {
