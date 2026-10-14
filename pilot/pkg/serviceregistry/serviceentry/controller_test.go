@@ -96,6 +96,21 @@ func makeWorkloadEntryInstanceWithServiceAccount(cfg *config.Config, workloadNam
 	return i
 }
 
+// shardDeleteUpdater is an xdsfake.Updater that, like the DiscoveryServer, treats a service deletion that finds no
+// endpoint shards to delete as a no-op, and reports no event for it. Both the service and the endpoint handler may
+// tear down the shards of a deleted service, so tests would otherwise see a deletion once or twice depending on timing.
+type shardDeleteUpdater struct {
+	*xdsfake.Updater
+	index *model.EndpointIndex
+}
+
+func (u *shardDeleteUpdater) SvcUpdate(shard model.ShardKey, hostname string, namespace string, event model.Event) {
+	if event == model.EventDelete && !u.index.DeleteServiceShard(shard, hostname, namespace, false) {
+		return
+	}
+	u.Updater.SvcUpdate(shard, hostname, namespace, event)
+}
+
 func initServiceDiscovery(t test.Failer) (model.ConfigStore, *Controller, *xdsfake.Updater) {
 	return initServiceDiscoveryWithOpts(t, false)
 }
@@ -144,6 +159,7 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	endpoints := model.NewEndpointIndex(model.DisabledCache{})
 	delegate := model.NewEndpointIndexUpdater(endpoints)
 	xdsUpdater := xdsfake.NewWithDelegate(delegate)
+	updater := &shardDeleteUpdater{Updater: xdsUpdater, index: endpoints}
 
 	meshcfg := meshwatcher.NewTestWatcher(mesh.DefaultMeshConfig())
 	client := kube.NewFakeClient()
@@ -158,9 +174,9 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	istioStore := configController
 	var controller *Controller
 	if !workloadOnly {
-		controller = NewController(configController, xdsUpdater, multiclusterController, meshcfg, opts...)
+		controller = NewController(configController, updater, multiclusterController, meshcfg, opts...)
 	} else {
-		controller = NewWorkloadEntryController(configController, xdsUpdater, multiclusterController, meshcfg, opts...)
+		controller = NewWorkloadEntryController(configController, updater, multiclusterController, meshcfg, opts...)
 	}
 	assert.NoError(t, multiclusterController.Run(stop))
 	client.RunAndWait(stop)
@@ -507,10 +523,10 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 		deleteConfigs([]*config.Config{httpStatic}, store, t)
 		// svcUpdate is triggered since "*.google.com" in same namespace is deleted and
 		// we need to delete endpoint shards. We expect a full push as the service has changed.
+		// The endpoint deletion is not pushed separately, as the service deletion already covers it.
 		expectEvents(
 			t, events,
 			Event{Type: "service", ID: "*.google.com", Namespace: httpStatic.Namespace},
-			Event{Type: "eds", ID: "*.google.com", Namespace: httpStatic.Namespace},
 			Event{Type: "xds", ID: "*.google.com"},
 		)
 
@@ -609,7 +625,6 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 		expectEvents(
 			t, events,
 			Event{Type: "service", ID: "other.com", Namespace: httpStatic.Namespace},
-			Event{Type: "eds", ID: "other.com", Namespace: httpStatic.Namespace},
 			Event{Type: "xds", ID: "other.com"},
 		) // service deleted
 	})
@@ -1086,7 +1101,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 			Event{Type: "service", ID: "updated.com", Namespace: selector.Namespace},
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "eds", ID: "updated.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com,updated.com"},
 			// the workload is now an endpoint of updated.com instead of selector.com
 			Event{Type: "proxy", ID: "2.2.2.2"},
@@ -1118,7 +1132,6 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "service", ID: "updated.com", Namespace: selector.Namespace},
 			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "eds", ID: "updated.com", Namespace: selector.Namespace},
 			Event{Type: "xds", ID: "selector.com,updated.com"},
 			Event{Type: "proxy", ID: "2.2.2.2"},
 		)
@@ -2315,7 +2328,7 @@ func expectServiceInstances(t testing.TB, sd *Controller, cfg *config.Config, po
 	// The system is eventually consistent, so add some retries
 	retry.UntilSuccessOrFail(t, func() error {
 		for i, svc := range svcs {
-			endpoints := GetEndpointsForPort(svc, sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index, port)
+			endpoints := GetEndpointsForPort(svc, sd.XdsUpdater.(*shardDeleteUpdater).index, port)
 			if endpoints == nil {
 				endpoints = []*model.IstioEndpoint{} // To simplify tests a bit
 			}
