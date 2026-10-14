@@ -221,6 +221,54 @@ func TestUpdateServiceEndpointsNewShardPushType(t *testing.T) {
 	})
 }
 
+func TestDeleteServiceShard(t *testing.T) {
+	c1Key := ShardKey{Cluster: "c1"}
+	c2Key := ShardKey{Cluster: "c2"}
+	endpoint := &IstioEndpoint{Addresses: []string{"10.0.0.1"}, Namespace: "foo", HostName: "foo.com"}
+	setup := func(shards ...ShardKey) *EndpointIndex {
+		endpoints := NewEndpointIndex(DisabledCache{})
+		for _, shard := range shards {
+			endpoints.UpdateServiceEndpoints(shard, "foo.com", "foo", []*IstioEndpoint{endpoint}, false)
+		}
+		return endpoints
+	}
+
+	t.Run("unknown service", func(t *testing.T) {
+		endpoints := setup()
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), false)
+	})
+
+	t.Run("deletes the shard and the keys", func(t *testing.T) {
+		endpoints := setup(c1Key)
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), true)
+		_, ok := endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, false)
+		// Deleting it again is a no-op.
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), false)
+	})
+
+	t.Run("keeps the keys while other shards have endpoints", func(t *testing.T) {
+		endpoints := setup(c1Key, c2Key)
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), true)
+		eps, ok := endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, true)
+		assert.Equal(t, len(eps.Shards), 1)
+		// The shard is already gone and the other shard keeps the keys, so there is nothing to delete.
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), false)
+	})
+
+	t.Run("deletes keys preserved by an earlier deletion", func(t *testing.T) {
+		endpoints := setup(c1Key)
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", true), true)
+		_, ok := endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, true)
+		// The shard has no endpoints, but deleting the keys still counts as a deletion.
+		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), true)
+		_, ok = endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, false)
+	})
+}
+
 func TestReplaceServiceEndpoints(t *testing.T) {
 	shardKey := ShardKey{Cluster: "c1"}
 	endpoint := func(addr, sa string, health HealthStatus) *IstioEndpoint {
