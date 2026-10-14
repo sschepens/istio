@@ -136,12 +136,8 @@ func (swi *ServiceWithInstances) Equals(other *ServiceWithInstances) bool {
 		return false
 	}
 
-	// Compare the instances using a custom equality function to avoid comapring swi.Service repeatedly,
-	// which has already been compared above.
 	return slices.EqualFunc(swi.Instances, other.Instances, func(a, b *WorkloadServiceInstance) bool {
-		return a.UID == b.UID &&
-			a.ServicePort.Equals(b.ServicePort) &&
-			a.Endpoint.Equals(b.Endpoint)
+		return a.EqualsIgnoringService(b)
 	})
 }
 
@@ -191,6 +187,16 @@ func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool 
 		wsi.ServicePort.Equals(other.ServicePort) &&
 		wsi.Endpoint.Equals(other.Endpoint) &&
 		wsi.Service.Equals(other.Service)
+}
+
+// EqualsIgnoringService checks equality of the WorkloadServiceInstance ignoring the Service field.
+func (wsi *WorkloadServiceInstance) EqualsIgnoringService(other *WorkloadServiceInstance) bool {
+	if wsi == other {
+		return true
+	}
+	return wsi.UID == other.UID &&
+		wsi.ServicePort.Equals(other.ServicePort) &&
+		wsi.Endpoint.Equals(other.Endpoint)
 }
 
 type Option func(*Controller)
