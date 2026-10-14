@@ -109,7 +109,7 @@ type Outputs struct {
 	// ServiceInstancesByNamespaceHost is a collection of instances keyed by namespace and hostname.
 	// Use cases:
 	// - as an input to EDS Updates
-	ServiceInstancesByNamespaceHost krt.Collection[*EDSInstances]
+	ServiceInstancesByNamespaceHost krt.Collection[*InstancesByNamespaceHost]
 	// ServiceInstances is a collection of all service instances.
 	// Use cases:
 	// - Finding service instances by IP.
@@ -135,12 +135,36 @@ func (swi *ServiceWithInstances) Equals(other *ServiceWithInstances) bool {
 	if !swi.Service.Equals(other.Service) {
 		return false
 	}
-	// Every instance points at swi.Service, which was just compared, so only the per-instance fields
-	// are checked here rather than deep-comparing the service once more per instance.
+
+	// Compare the instances using a custom equality function to avoid comapring swi.Service repeatedly,
+	// which has already been compared above.
 	return slices.EqualFunc(swi.Instances, other.Instances, func(a, b *WorkloadServiceInstance) bool {
 		return a.UID == b.UID &&
 			a.ServicePort.Equals(b.ServicePort) &&
 			a.Endpoint.Equals(b.Endpoint)
+	})
+}
+
+type InstancesByNamespaceHost struct {
+	Namespace string
+	Hostname  string
+	Endpoints []*model.IstioEndpoint
+	// HasDNSServiceEndpoint is set when an endpoint backs a DNS resolving service. Those are inlined
+	// into the cluster rather than delivered over EDS, so changing them requires a config push.
+	HasDNSServiceEndpoint bool
+}
+
+func (e *InstancesByNamespaceHost) ResourceName() string {
+	return e.Namespace + "/" + e.Hostname
+}
+
+func (e *InstancesByNamespaceHost) Equals(other *InstancesByNamespaceHost) bool {
+	if e.Namespace != other.Namespace || e.Hostname != other.Hostname || e.HasDNSServiceEndpoint != other.HasDNSServiceEndpoint {
+		return false
+	}
+
+	return slices.EqualFunc(e.Endpoints, other.Endpoints, func(a, b *model.IstioEndpoint) bool {
+		return a.Equals(b)
 	})
 }
 
@@ -167,29 +191,6 @@ func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool 
 		wsi.ServicePort.Equals(other.ServicePort) &&
 		wsi.Endpoint.Equals(other.Endpoint) &&
 		wsi.Service.Equals(other.Service)
-}
-
-type EDSInstances struct {
-	Namespace string
-	Host      string
-	Endpoints []*model.IstioEndpoint
-	// HasDNSServiceEndpoint is set when an endpoint backs a DNS resolving service. Those are inlined
-	// into the cluster rather than delivered over EDS, so changing them requires a config push.
-	HasDNSServiceEndpoint bool
-}
-
-func (e *EDSInstances) ResourceName() string {
-	return e.Namespace + "/" + e.Host
-}
-
-func (e *EDSInstances) Equals(other *EDSInstances) bool {
-	if e.Namespace != other.Namespace || e.Host != other.Host || e.HasDNSServiceEndpoint != other.HasDNSServiceEndpoint {
-		return false
-	}
-
-	return slices.EqualFunc(e.Endpoints, other.Endpoints, func(a, b *model.IstioEndpoint) bool {
-		return a.Equals(b)
-	})
 }
 
 type Option func(*Controller)
@@ -372,13 +373,13 @@ func (s *Controller) buildCollections() {
 
 		mergedInstancesByNamespaceHost := krt.NewPointerCollection(
 			instancesByNsHost,
-			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) *EDSInstances {
+			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) *InstancesByNamespaceHost {
 				namespace, hostname, _ := strings.Cut(obj.Key, "/")
 				endpoints, hasDNSServiceEndpoint := mergeServiceInstances(obj.Objects)
 
-				return &EDSInstances{
+				return &InstancesByNamespaceHost{
 					Namespace:             namespace,
-					Host:                  hostname,
+					Hostname:              hostname,
 					Endpoints:             endpoints,
 					HasDNSServiceEndpoint: hasDNSServiceEndpoint,
 				}
@@ -399,7 +400,7 @@ func (s *Controller) buildCollections() {
 	s.outputs.Workloads = wleWorkloads
 }
 
-func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances]) {
+func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByNamespaceHost]) {
 	s.pushMutex.Lock()
 	defer s.pushMutex.Unlock()
 
@@ -408,23 +409,23 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*EDSInstances
 		obj := e.Latest()
 		// This handler operates independently from the service update mechanism, so the service may
 		// already be gone by the time we get here.
-		serviceExists := s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Host) != nil
+		serviceExists := s.outputs.ServicesByNamespaceHost.GetKey(obj.Namespace+"/"+obj.Hostname) != nil
 
 		if e.Event == controllers.EventDelete {
-			s.XdsUpdater.EDSUpdate(s.shard, obj.Host, obj.Namespace, nil)
+			s.XdsUpdater.EDSUpdate(s.shard, obj.Hostname, obj.Namespace, nil)
 		} else {
 			// If this handler gets delayed, we could end up re-creating EDS Shards for non-existing services.
 			if !serviceExists {
 				continue
 			}
 			// krt only emits this event when an endpoint changed, so the EndpointIndex need not diff them again.
-			s.XdsUpdater.EDSReplace(s.shard, obj.Host, obj.Namespace, obj.Endpoints)
+			s.XdsUpdater.EDSReplace(s.shard, obj.Hostname, obj.Namespace, obj.Endpoints)
 		}
 
 		// DNS endpoints are inlined into the cluster, so gaining, changing or losing them has to regenerate
 		// it. A deleted service gets that push from the service handler.
 		if serviceExists && ((e.Old != nil && (*e.Old).HasDNSServiceEndpoint) || (e.New != nil && (*e.New).HasDNSServiceEndpoint)) {
-			dnsServicesUpdated.Insert(model.ConfigKey{Kind: kind.ServiceEntry, Name: obj.Host, Namespace: obj.Namespace})
+			dnsServicesUpdated.Insert(model.ConfigKey{Kind: kind.ServiceEntry, Name: obj.Hostname, Namespace: obj.Namespace})
 		}
 	}
 	if len(dnsServicesUpdated) > 0 {

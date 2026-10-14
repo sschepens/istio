@@ -2156,8 +2156,6 @@ func (s *Service) DeepCopy() *Service {
 
 // Equals compares two service objects.
 func (s *Service) Equals(other *Service) bool {
-	// The same pointer is trivially equal. Registries hand the same *Service to every instance derived
-	// from it, making this the common case when comparing instances.
 	if s == other {
 		return true
 	}
