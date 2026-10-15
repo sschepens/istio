@@ -15,10 +15,66 @@
 package model
 
 import (
+	"sync"
 	"testing"
 
 	"istio.io/istio/pkg/test/util/assert"
+	"istio.io/istio/pkg/util/sets"
 )
+
+func TestEndpointShardsWithoutMutex(t *testing.T) {
+	shards := &EndpointShards{}
+	shards.Lock()
+	shards.Shards = map[ShardKey][]*IstioEndpoint{
+		{Cluster: "c1"}: {{Addresses: []string{"10.0.0.1"}, ServicePortName: "http"}},
+	}
+	shards.Unlock()
+
+	shards.RLock()
+	assert.Equal(t, shards.Keys(), []ShardKey{{Cluster: "c1"}})
+	shards.RUnlock()
+	assert.Equal(t, len(shards.CopyEndpoints(map[string]int{"http": 80}, sets.New(80))[80]), 1)
+
+	copied := shards.DeepCopy()
+	assert.Equal(t, copied.mu == nil, true)
+	copied.Shards[ShardKey{Cluster: "c1"}][0].Addresses[0] = "10.0.0.2"
+	assert.Equal(t, shards.Shards[ShardKey{Cluster: "c1"}][0].Addresses[0], "10.0.0.1")
+}
+
+// Exercise the public read paths while mutable shards are updated. Run with -race
+// to detect missing synchronization between readers and writers.
+func TestEndpointShardsConcurrentUpdates(t *testing.T) {
+	index := NewMutableEndpointIndex(DisabledCache{})
+	shards, _ := index.GetOrCreateEndpointShard("svc", "ns")
+	assert.Equal(t, shards.mu != nil, true)
+
+	var wg sync.WaitGroup
+	for _, key := range []ShardKey{{Cluster: "c1"}, {Cluster: "c2"}} {
+		wg.Go(func() {
+			for range 100 {
+				index.UpdateServiceEndpoints(key, "svc", "ns", []*IstioEndpoint{
+					{Addresses: []string{"10.0.0.1"}, ServicePortName: "http", ServiceAccount: "sa"},
+				}, false)
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 100 {
+			shards.CopyEndpoints(map[string]int{"http": 80}, sets.New(80))
+			shards.DeepCopy()
+			shards.RLock()
+			shards.Keys()
+			shards.ServiceAccounts.Copy()
+			shards.RUnlock()
+		}
+	})
+	wg.Wait()
+
+	copied := shards.DeepCopy()
+	assert.Equal(t, copied.mu == nil, true)
+	assert.Equal(t, len(copied.Shards), 2)
+	assert.Equal(t, copied.ServiceAccounts, sets.New("sa"))
+}
 
 func TestUpdateServiceAccount(t *testing.T) {
 	var (

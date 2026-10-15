@@ -54,8 +54,10 @@ func (sk ShardKey) MarshalText() (text []byte, err error) {
 // individual shards incrementally. The shards are aggregated and split into
 // clusters when a push for the specific cluster is needed.
 type EndpointShards struct {
-	// mutex protecting below map.
-	sync.RWMutex
+	// mu protects Shards and ServiceAccounts when they can be updated concurrently.
+	// A nil mutex is valid only for immutable or exclusively owned data. It must be
+	// initialized before publishing mutable shards and must never be changed afterward.
+	mu *sync.RWMutex
 
 	// Shards is used to track the shards. EDS updates are grouped by shard.
 	// Current implementation uses the registry name as key - in multicluster this is the
@@ -68,6 +70,34 @@ type EndpointShards struct {
 	// Due to the larger time, it is still possible that connection errors will occur while
 	// CDS is updated.
 	ServiceAccounts sets.String
+}
+
+// Lock locks mutable shards for writing. It is a no-op when no mutex is configured.
+func (es *EndpointShards) Lock() {
+	if es.mu != nil {
+		es.mu.Lock()
+	}
+}
+
+// Unlock releases the write lock, if configured.
+func (es *EndpointShards) Unlock() {
+	if es.mu != nil {
+		es.mu.Unlock()
+	}
+}
+
+// RLock locks mutable shards for reading. It is a no-op when no mutex is configured.
+func (es *EndpointShards) RLock() {
+	if es.mu != nil {
+		es.mu.RLock()
+	}
+}
+
+// RUnlock releases the read lock, if configured.
+func (es *EndpointShards) RUnlock() {
+	if es.mu != nil {
+		es.mu.RUnlock()
+	}
 }
 
 // Keys gives a sorted list of keys for EndpointShards.Shards.
@@ -119,6 +149,7 @@ func (es *EndpointShards) CopyEndpoints(portMap map[string]int, ports sets.Set[i
 	return res
 }
 
+// DeepCopy returns an exclusively owned copy without a mutex.
 func (es *EndpointShards) DeepCopy() *EndpointShards {
 	es.RLock()
 	defer es.RUnlock()
@@ -220,6 +251,7 @@ func (e *MutableEndpointIndex) GetOrCreateEndpointShard(serviceName, namespace s
 	ep, ok := m[namespace]
 	if !ok {
 		ep = &EndpointShards{
+			mu:              &sync.RWMutex{},
 			Shards:          map[ShardKey][]*IstioEndpoint{},
 			ServiceAccounts: sets.String{},
 		}
