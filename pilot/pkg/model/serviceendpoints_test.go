@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
+	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/util/sets"
 )
@@ -71,10 +72,8 @@ func TestServiceEndpoints(t *testing.T) {
 				return false
 			})
 			assert.Equal(t, calls, 1)
-			accounts := tt.view.CopyServiceAccounts()
+			accounts := tt.view.ServiceAccounts()
 			assert.Equal(t, accounts, tt.accounts)
-			clear(accounts)
-			assert.Equal(t, tt.view.CopyServiceAccounts(), tt.accounts)
 			assert.Equal(t, len(CopyEndpoints(tt.view, map[string]int{"http": 80}, sets.New(80))[80]), len(tt.keys))
 		})
 	}
@@ -93,4 +92,35 @@ func TestCopyEndpoints(t *testing.T) {
 		80: {byName},
 		81: {byLegacyPort},
 	})
+}
+
+func TestMutableEndpointServiceAccounts(t *testing.T) {
+	index := NewMutableEndpointIndex(DisabledCache{})
+	key := ShardKey{Cluster: "c1"}
+	index.UpdateServiceEndpoints(key, "svc", "ns", []*IstioEndpoint{
+		{Addresses: []string{"10.0.0.1"}, ServiceAccount: "original"},
+	}, false)
+	view, found := index.EndpointsForService("svc", "ns")
+	assert.Equal(t, found, true)
+	accounts := view.ServiceAccounts()
+	assert.Equal(t, accounts, sets.New("original"))
+
+	index.UpdateServiceEndpoints(key, "svc", "ns", []*IstioEndpoint{
+		{Addresses: []string{"10.0.0.1"}, ServiceAccount: "updated"},
+	}, false)
+	assert.Equal(t, accounts, sets.New("original"))
+	assert.Equal(t, view.ServiceAccounts(), sets.New("updated"))
+}
+
+func TestAddServiceAccountsReadOnly(t *testing.T) {
+	endpoints := SingleShardEndpoints{Accounts: sets.New("endpoint-account")}
+	service := &Service{
+		Hostname: "svc", Attributes: ServiceAttributes{Namespace: "ns"},
+		ServiceAccounts: []string{"declared-account"},
+	}
+	push := NewPushContext()
+	push.Mesh = mesh.DefaultMeshConfig()
+	push.addServiceAccounts(service, endpoints.ServiceAccounts())
+	assert.Equal(t, endpoints.Accounts, sets.New("endpoint-account"))
+	assert.Equal(t, push.ServiceAccounts(service.Hostname, service.Attributes.Namespace), []string{"declared-account", "endpoint-account"})
 }

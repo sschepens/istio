@@ -24,34 +24,34 @@ import (
 
 func TestEndpointShardsDeepCopy(t *testing.T) {
 	shards := &EndpointShards{}
-	shards.Lock()
-	shards.Shards = map[ShardKey][]*IstioEndpoint{
+	shards.mu.Lock()
+	shards.shards = map[ShardKey][]*IstioEndpoint{
 		{Cluster: "c1"}: {{Addresses: []string{"10.0.0.1"}, ServicePortName: "http"}},
 	}
-	shards.Unlock()
+	shards.mu.Unlock()
 
-	shards.RLock()
-	assert.Equal(t, shards.Keys(), []ShardKey{{Cluster: "c1"}})
-	shards.RUnlock()
+	shards.mu.RLock()
+	assert.Equal(t, shards.keys(), []ShardKey{{Cluster: "c1"}})
+	shards.mu.RUnlock()
 	assert.Equal(t, len(CopyEndpoints(shards, map[string]int{"http": 80}, sets.New(80))[80]), 1)
 
 	copied := shards.DeepCopy()
-	copied.Shards[ShardKey{Cluster: "c1"}][0].Addresses[0] = "10.0.0.2"
-	assert.Equal(t, shards.Shards[ShardKey{Cluster: "c1"}][0].Addresses[0], "10.0.0.1")
+	copied.shards[ShardKey{Cluster: "c1"}][0].Addresses[0] = "10.0.0.2"
+	assert.Equal(t, shards.shards[ShardKey{Cluster: "c1"}][0].Addresses[0], "10.0.0.1")
 
-	shards.Lock()
-	defer shards.Unlock()
-	if !copied.TryLock() {
+	shards.mu.Lock()
+	defer shards.mu.Unlock()
+	if !copied.mu.TryLock() {
 		t.Fatal("copy must have an independent, unlocked mutex")
 	}
-	copied.Unlock()
+	copied.mu.Unlock()
 }
 
 // Exercise the public read paths while mutable shards are updated. Run with -race
 // to detect missing synchronization between readers and writers.
 func TestEndpointShardsConcurrentUpdates(t *testing.T) {
 	index := NewMutableEndpointIndex(DisabledCache{})
-	shards, _ := index.GetOrCreateEndpointShard("svc", "ns")
+	shards, _ := index.getOrCreateEndpointShard("svc", "ns")
 
 	var wg sync.WaitGroup
 	for _, key := range []ShardKey{{Cluster: "c1"}, {Cluster: "c2"}} {
@@ -73,14 +73,14 @@ func TestEndpointShardsConcurrentUpdates(t *testing.T) {
 				}
 				return true
 			})
-			shards.CopyServiceAccounts()
+			shards.ServiceAccounts()
 		}
 	})
 	wg.Wait()
 
 	copied := shards.DeepCopy()
-	assert.Equal(t, len(copied.Shards), 2)
-	assert.Equal(t, copied.ServiceAccounts, sets.New("sa"))
+	assert.Equal(t, len(copied.shards), 2)
+	assert.Equal(t, copied.serviceAccounts, sets.New("sa"))
 }
 
 func TestUpdateServiceAccount(t *testing.T) {
@@ -179,17 +179,17 @@ func TestUpdateServiceAccount(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			originalEndpointsShard := &EndpointShards{
-				Shards: map[ShardKey][]*IstioEndpoint{
+				shards: map[ShardKey][]*IstioEndpoint{
 					c1Key: cluster1Endpoints,
 					c2Key: {{Addresses: []string{"10.244.0.1"}, ServiceAccount: "sa1"}, {Addresses: []string{"10.244.0.2"}, ServiceAccount: "sa-vm2"}},
 				},
-				ServiceAccounts: map[string]struct{}{
+				serviceAccounts: map[string]struct{}{
 					"sa1":    {},
 					"sa-vm1": {},
 					"sa-vm2": {},
 				},
 			}
-			originalEndpointsShard.Shards[tc.shardKey] = tc.endpoints
+			originalEndpointsShard.shards[tc.shardKey] = tc.endpoints
 			ret := updateShardServiceAccount(originalEndpointsShard, "test-svc")
 			if ret != tc.expect {
 				t.Errorf("expect UpdateServiceAccount %v, but got %v", tc.expect, ret)
@@ -245,7 +245,7 @@ func TestUpdateServiceEndpoints(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			endpoints.UpdateServiceEndpoints(tc.shardKey, tc.hostname, tc.namespace, tc.endpoints, true)
 			eps, _ := endpoints.EndpointsForService(tc.hostname, tc.namespace)
-			assert.Equal(t, len(snapshotServiceEndpoints(eps).Shards[tc.shardKey]), tc.expect)
+			assert.Equal(t, len(snapshotServiceEndpoints(eps).shards[tc.shardKey]), tc.expect)
 		})
 	}
 }
@@ -270,7 +270,7 @@ func TestUpdateServiceEndpointsNewShardPushType(t *testing.T) {
 		// The endpoints are recorded regardless, so a later service update can pick them up.
 		eps, ok := endpoints.EndpointsForService("foo.com", "foo")
 		assert.Equal(t, ok, true)
-		assert.Equal(t, len(snapshotServiceEndpoints(eps).Shards[shardKey]), 1)
+		assert.Equal(t, len(snapshotServiceEndpoints(eps).shards[shardKey]), 1)
 	})
 
 	t.Run("new service account still requires a full push", func(t *testing.T) {

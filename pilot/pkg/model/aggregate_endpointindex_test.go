@@ -65,11 +65,11 @@ func TestAggregateEndpointIndex(t *testing.T) {
 	index := NewAggregateEndpointIndex(mutable, external)
 	shards, found := index.EndpointsForService("svc", "ns")
 	assert.Equal(t, found, true)
-	assert.Equal(t, snapshotServiceEndpoints(shards).Keys(), []ShardKey{externalShard, kubeShard})
-	assert.Equal(t, shards.CopyServiceAccounts(), sets.New("shared", "external"))
+	assert.Equal(t, snapshotServiceEndpoints(shards).keys(), []ShardKey{externalShard, kubeShard})
+	assert.Equal(t, shards.ServiceAccounts(), sets.New("shared", "external"))
 	assert.Equal(t, len(CopyEndpoints(shards, map[string]int{"http": 80}, sets.New(80))[80]), 2)
-	assert.Equal(t, index.Shardz()["svc"]["ns"].Shards, snapshotServiceEndpoints(shards).Shards)
-	assert.Equal(t, index.Shardz()["svc"]["ns"].ServiceAccounts, shards.CopyServiceAccounts())
+	assert.Equal(t, index.Shardz()["svc"]["ns"].shards, snapshotServiceEndpoints(shards).shards)
+	assert.Equal(t, index.Shardz()["svc"]["ns"].serviceAccounts, shards.ServiceAccounts())
 
 	// A service with no endpoints is distinct from a missing service or namespace.
 	_, found = index.EndpointsForService("svc", "other")
@@ -82,23 +82,23 @@ func TestAggregateEndpointIndex(t *testing.T) {
 
 	// Debug output owns its endpoint objects, slices, maps, and account sets.
 	dump := index.Shardz()
-	dump["svc"]["ns"].Shards[kubeShard][0].Addresses[0] = "changed"
-	dump["svc"]["ns"].Shards[externalShard][0].Addresses[0] = "changed"
-	dump["svc"]["ns"].ServiceAccounts.Delete("external")
+	dump["svc"]["ns"].shards[kubeShard][0].Addresses[0] = "changed"
+	dump["svc"]["ns"].shards[externalShard][0].Addresses[0] = "changed"
+	dump["svc"]["ns"].serviceAccounts.Delete("external")
 	delete(dump["svc"], "other")
 	fresh := index.Shardz()
-	assert.Equal(t, fresh["svc"]["ns"].Shards[kubeShard][0].Addresses[0], "10.0.0.1")
-	assert.Equal(t, fresh["svc"]["ns"].Shards[externalShard][0].Addresses[0], "10.0.0.2")
-	assert.Equal(t, fresh["svc"]["ns"].ServiceAccounts, sets.New("shared", "external"))
+	assert.Equal(t, fresh["svc"]["ns"].shards[kubeShard][0].Addresses[0], "10.0.0.1")
+	assert.Equal(t, fresh["svc"]["ns"].shards[externalShard][0].Addresses[0], "10.0.0.2")
+	assert.Equal(t, fresh["svc"]["ns"].serviceAccounts, sets.New("shared", "external"))
 	assert.Equal(t, len(fresh["svc"]), 2)
 
 	// Removing the mutable contribution must leave the other source visible.
 	mutable.DeleteServiceShard(kubeShard, "svc", "ns", false)
 	remaining, found := index.EndpointsForService("svc", "ns")
 	assert.Equal(t, found, true)
-	assert.Equal(t, snapshotServiceEndpoints(remaining).Keys(), []ShardKey{externalShard})
+	assert.Equal(t, snapshotServiceEndpoints(remaining).keys(), []ShardKey{externalShard})
 	// The existing wrapper delegates to the mutable source and sees the deletion.
-	assert.Equal(t, snapshotServiceEndpoints(shards).Keys(), []ShardKey{externalShard})
+	assert.Equal(t, snapshotServiceEndpoints(shards).keys(), []ShardKey{externalShard})
 }
 
 func TestAggregateEndpointIndexDisjointShards(t *testing.T) {
@@ -164,8 +164,8 @@ func TestAggregateEndpointIndexLiveView(t *testing.T) {
 	mutable.UpdateServiceEndpoints(key, "svc", "ns", []*IstioEndpoint{
 		{Addresses: []string{"10.0.0.2"}, ServiceAccount: "new"},
 	}, false)
-	assert.Equal(t, snapshotServiceEndpoints(view).Shards[key][0].Addresses, []string{"10.0.0.2"})
-	assert.Equal(t, view.CopyServiceAccounts(), sets.New("new", "static"))
+	assert.Equal(t, snapshotServiceEndpoints(view).shards[key][0].Addresses, []string{"10.0.0.2"})
+	assert.Equal(t, view.ServiceAccounts(), sets.New("new", "static"))
 }
 
 func TestAggregateEndpointIndexEmptyAndSingleSource(t *testing.T) {
@@ -182,7 +182,7 @@ func TestAggregateEndpointIndexEmptyAndSingleSource(t *testing.T) {
 	}, false)
 	shards, found = env.EndpointIndex.EndpointsForService("svc", "ns")
 	assert.Equal(t, found, true)
-	assert.Equal(t, snapshotServiceEndpoints(shards).Shards[key][0].Addresses, []string{"10.0.0.1"})
+	assert.Equal(t, snapshotServiceEndpoints(shards).shards[key][0].Addresses, []string{"10.0.0.1"})
 	env.MutableEndpointIndex.DeleteShard(key)
 	_, found = env.EndpointIndex.EndpointsForService("svc", "ns")
 	assert.Equal(t, found, false)
@@ -190,9 +190,9 @@ func TestAggregateEndpointIndexEmptyAndSingleSource(t *testing.T) {
 
 // snapshotServiceEndpoints adapts any read implementation for assertions and debug fixtures.
 func snapshotServiceEndpoints(endpoints ServiceEndpoints) *EndpointShards {
-	out := &EndpointShards{Shards: make(map[ShardKey][]*IstioEndpoint), ServiceAccounts: endpoints.CopyServiceAccounts()}
+	out := &EndpointShards{shards: make(map[ShardKey][]*IstioEndpoint), serviceAccounts: endpoints.ServiceAccounts().Copy()}
 	endpoints.ForEachShard(func(key ShardKey, eps []*IstioEndpoint) bool {
-		out.Shards[key] = append(out.Shards[key], eps...)
+		out.shards[key] = append(out.shards[key], eps...)
 		return true
 	})
 	return out

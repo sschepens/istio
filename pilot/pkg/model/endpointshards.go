@@ -15,6 +15,7 @@
 package model
 
 import (
+	"encoding/json"
 	"sort"
 	"sync"
 
@@ -54,29 +55,44 @@ func (sk ShardKey) MarshalText() (text []byte, err error) {
 // individual shards incrementally. The shards are aggregated and split into
 // clusters when a push for the specific cluster is needed.
 type EndpointShards struct {
-	// Protects Shards and ServiceAccounts.
-	sync.RWMutex
+	// Protects shards and serviceAccounts.
+	mu sync.RWMutex
 
-	// Shards is used to track the shards. EDS updates are grouped by shard.
+	// shards is used to track the shards. EDS updates are grouped by shard.
 	// Current implementation uses the registry name as key - in multicluster this is the
 	// name of the k8s cluster, derived from the config (secret).
-	Shards map[ShardKey][]*IstioEndpoint
+	shards map[ShardKey][]*IstioEndpoint
 
-	// ServiceAccounts has the concatenation of all service accounts seen so far in endpoints.
+	// serviceAccounts has the concatenation of all service accounts seen so far in endpoints.
 	// This is updated on push, based on shards. If the previous list is different than
 	// current list, a full push will be forced, to trigger a secure naming update.
 	// Due to the larger time, it is still possible that connection errors will occur while
 	// CDS is updated.
-	ServiceAccounts sets.String
+	// Published sets must be replaced rather than modified in place, since
+	// ServiceAccounts returns them directly to callers.
+	serviceAccounts sets.String
 }
 
-// Keys gives a sorted list of keys for EndpointShards.Shards.
-// Calls to Keys should be guarded with a lock on the EndpointShards.
-func (es *EndpointShards) Keys() []ShardKey {
+// MarshalJSON preserves the debug representation while keeping the fields private.
+func (es *EndpointShards) MarshalJSON() ([]byte, error) {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+	return json.Marshal(struct {
+		Shards          map[ShardKey][]*IstioEndpoint
+		ServiceAccounts sets.String
+	}{
+		Shards:          es.shards,
+		ServiceAccounts: es.serviceAccounts,
+	})
+}
+
+// keys gives a sorted list of keys for EndpointShards.shards.
+// Calls to keys should be guarded with a lock on the EndpointShards.
+func (es *EndpointShards) keys() []ShardKey {
 	// len(shards) ~= number of remote clusters which isn't too large, doing this sort frequently
 	// shouldn't be too problematic. If it becomes an issue we can cache it in the EndpointShards struct.
-	keys := make([]ShardKey, 0, len(es.Shards))
-	for k := range es.Shards {
+	keys := make([]ShardKey, 0, len(es.shards))
+	for k := range es.shards {
 		keys = append(keys, k)
 	}
 	if len(keys) >= 2 {
@@ -92,34 +108,35 @@ func (es *EndpointShards) Keys() []ShardKey {
 
 // ForEachShard visits shards in provider/cluster order while holding the read lock.
 func (es *EndpointShards) ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool) {
-	es.RLock()
-	defer es.RUnlock()
-	for _, key := range es.Keys() {
-		if !yield(key, es.Shards[key]) {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+	for _, key := range es.keys() {
+		if !yield(key, es.shards[key]) {
 			return
 		}
 	}
 }
 
-// CopyServiceAccounts returns an independent copy of the tracked service accounts.
-func (es *EndpointShards) CopyServiceAccounts() sets.String {
-	es.RLock()
-	defer es.RUnlock()
-	return es.ServiceAccounts.Copy()
+// ServiceAccounts returns the tracked service accounts. The returned set is read-only
+// and remains valid across updates; callers must copy it before making changes.
+func (es *EndpointShards) ServiceAccounts() sets.String {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+	return es.serviceAccounts
 }
 
 // DeepCopy returns an exclusively owned copy with an independent mutex.
 func (es *EndpointShards) DeepCopy() *EndpointShards {
-	es.RLock()
-	defer es.RUnlock()
+	es.mu.RLock()
+	defer es.mu.RUnlock()
 	res := &EndpointShards{
-		Shards:          make(map[ShardKey][]*IstioEndpoint, len(es.Shards)),
-		ServiceAccounts: es.ServiceAccounts.Copy(),
+		shards:          make(map[ShardKey][]*IstioEndpoint, len(es.shards)),
+		serviceAccounts: es.serviceAccounts.Copy(),
 	}
-	for k, v := range es.Shards {
-		res.Shards[k] = make([]*IstioEndpoint, 0, len(v))
+	for k, v := range es.shards {
+		res.shards[k] = make([]*IstioEndpoint, 0, len(v))
 		for _, ep := range v {
-			res.Shards[k] = append(res.Shards[k], ep.DeepCopy())
+			res.shards[k] = append(res.shards[k], ep.DeepCopy())
 		}
 	}
 	return res
@@ -197,9 +214,9 @@ func (e *MutableEndpointIndex) shardsForService(serviceName, namespace string) (
 	return shards, ok
 }
 
-// GetOrCreateEndpointShard returns the shards. The second return parameter will be true if this service was seen
+// getOrCreateEndpointShard returns the shards. The second return parameter will be true if this service was seen
 // for the first time.
-func (e *MutableEndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
+func (e *MutableEndpointIndex) getOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
 	// attempt to find endpoint shard with a read lock first, to avoid unnecessary lock contention. If not found, acquire a write lock and create it.
 	if ep, ok := e.shardsForService(serviceName, namespace); ok {
 		return ep, false
@@ -217,8 +234,8 @@ func (e *MutableEndpointIndex) GetOrCreateEndpointShard(serviceName, namespace s
 	ep, ok := m[namespace]
 	if !ok {
 		ep = &EndpointShards{
-			Shards:          map[ShardKey][]*IstioEndpoint{},
-			ServiceAccounts: sets.String{},
+			shards:          map[ShardKey][]*IstioEndpoint{},
+			serviceAccounts: sets.String{},
 		}
 		m[namespace] = ep
 		// Clear the cache here to avoid race in cache writes.
@@ -273,19 +290,19 @@ func (e *MutableEndpointIndex) deleteServiceInner(shard ShardKey, serviceName, n
 		return
 	}
 	epShards := e.shardsBySvc[serviceName][namespace]
-	epShards.Lock()
-	delete(epShards.Shards, shard)
+	epShards.mu.Lock()
+	delete(epShards.shards, shard)
 	// Clear the cache here to avoid race in cache writes.
 	e.clearCacheForService(serviceName, namespace)
 	if !preserveKeys {
-		if len(epShards.Shards) == 0 {
+		if len(epShards.shards) == 0 {
 			delete(e.shardsBySvc[serviceName], namespace)
 		}
 		if len(e.shardsBySvc[serviceName]) == 0 {
 			delete(e.shardsBySvc, serviceName)
 		}
 	}
-	epShards.Unlock()
+	epShards.mu.Unlock()
 }
 
 // PushType is an enumeration that decides what type push we should do when we get EDS update.
@@ -332,11 +349,11 @@ func (e *MutableEndpointIndex) UpdateServiceEndpoints(
 	// trigger their own service update (a kind.ServiceEntry ConfigUpdate, see initRegistryEventHandlers)
 	// whenever a service is added, which re-initializes the service registry and picks these endpoints
 	// up. If the service is not known yet, an endpoint-only push is simply a no-op until it is.
-	ep, _ := e.GetOrCreateEndpointShard(hostname, namespace)
+	ep, _ := e.getOrCreateEndpointShard(hostname, namespace)
 
-	ep.Lock()
-	defer ep.Unlock()
-	oldIstioEndpoints := ep.Shards[shard]
+	ep.mu.Lock()
+	defer ep.mu.Unlock()
+	oldIstioEndpoints := ep.shards[shard]
 	newIstioEndpoints, needPush := endpointUpdateRequiresPush(oldIstioEndpoints, istioEndpoints)
 
 	if !needPush {
@@ -344,7 +361,7 @@ func (e *MutableEndpointIndex) UpdateServiceEndpoints(
 		pushType = NoPush
 	}
 
-	ep.Shards[shard] = newIstioEndpoints
+	ep.shards[shard] = newIstioEndpoints
 
 	// Check if ServiceAccounts have changed. We should do a full push if they have changed.
 	saUpdated := updateShardServiceAccount(ep, hostname)
@@ -428,9 +445,9 @@ func endpointUpdateRequiresPush(oldIstioEndpoints []*IstioEndpoint, incomingEndp
 // updateShardServiceAccount updates the service endpoints' sa when service/endpoint event happens.
 // Note: it is not concurrent safe.
 func updateShardServiceAccount(shards *EndpointShards, serviceName string) bool {
-	oldServiceAccount := shards.ServiceAccounts
+	oldServiceAccount := shards.serviceAccounts
 	serviceAccounts := sets.String{}
-	for _, epShards := range shards.Shards {
+	for _, epShards := range shards.shards {
 		for _, ep := range epShards {
 			if ep.ServiceAccount != "" {
 				serviceAccounts.Insert(ep.ServiceAccount)
@@ -439,7 +456,7 @@ func updateShardServiceAccount(shards *EndpointShards, serviceName string) bool 
 	}
 
 	if !oldServiceAccount.Equals(serviceAccounts) {
-		shards.ServiceAccounts = serviceAccounts
+		shards.serviceAccounts = serviceAccounts
 		log.Debugf("Updating service accounts now, svc %v, before service account %v, after %v",
 			serviceName, oldServiceAccount, serviceAccounts)
 		return true

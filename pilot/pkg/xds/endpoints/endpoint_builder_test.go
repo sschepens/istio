@@ -55,13 +55,10 @@ func TestWeightedWaypointEndpointsFailsClosed(t *testing.T) {
 	}
 
 	endpointIndex := model.NewMutableEndpointIndex(model.NewXdsCache())
-	wpShards, _ := endpointIndex.GetOrCreateEndpointShard("wp.ns.svc.cluster.local", "ns")
-	wpShards.Lock()
-	wpShards.Shards[model.ShardKey{Cluster: "cluster1"}] = []*model.IstioEndpoint{
+	endpointIndex.UpdateServiceEndpoints(model.ShardKey{Cluster: "cluster1"}, "wp.ns.svc.cluster.local", "ns", []*model.IstioEndpoint{
 		{Addresses: []string{"10.1.0.1"}, ServicePortName: "hbone", EndpointPort: 15008, HostName: "wp.ns.svc.cluster.local", Namespace: "ns"},
 		{Addresses: []string{"10.1.0.2"}, ServicePortName: "hbone", EndpointPort: 15008, HostName: "wp.ns.svc.cluster.local", Namespace: "ns"},
-	}
-	wpShards.Unlock()
+	}, false)
 
 	proxy := &model.Proxy{
 		Type:            model.Router,
@@ -792,9 +789,7 @@ func TestBuildClusterLoadAssignment_InferenceServicePortFiltering(t *testing.T) 
 			}
 
 			endpointIndex := model.NewMutableEndpointIndex(model.NewXdsCache())
-			shards, _ := endpointIndex.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
-			shards.Lock()
-			shards.Shards[model.ShardKey{Cluster: "cluster1"}] = []*model.IstioEndpoint{
+			endpointIndex.UpdateServiceEndpoints(model.ShardKey{Cluster: "cluster1"}, "example.ns.svc.cluster.local", "ns", []*model.IstioEndpoint{
 				{
 					Addresses:       []string{"10.0.0.1"},
 					ServicePortName: "http-80",
@@ -816,8 +811,7 @@ func TestBuildClusterLoadAssignment_InferenceServicePortFiltering(t *testing.T) 
 					HostName:        "example.ns.svc.cluster.local",
 					Namespace:       "ns",
 				},
-			}
-			shards.Unlock()
+			}, false)
 
 			env := model.NewEnvironment()
 			configStore := model.NewFakeStore()

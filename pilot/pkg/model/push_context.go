@@ -1576,7 +1576,7 @@ func (ps *PushContext) initServiceRegistry(env *Environment, configsUpdate sets.
 				instancesByPort[port] = instances
 			}
 			// Extract service accounts while we have the shards.
-			accounts = shards.CopyServiceAccounts()
+			accounts = shards.ServiceAccounts()
 		}
 		ps.addServiceAccounts(s, accounts)
 
@@ -1640,7 +1640,7 @@ func (ps *PushContext) addServiceAccounts(s *Service, accounts sets.String) {
 		if accounts == nil {
 			accounts = sets.New(s.ServiceAccounts...)
 		} else {
-			accounts = accounts.InsertAll(s.ServiceAccounts...)
+			accounts = accounts.Copy().InsertAll(s.ServiceAccounts...)
 		}
 	}
 	ps.serviceAccounts[serviceAccountKey{

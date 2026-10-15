@@ -90,10 +90,10 @@ func (s aggregateServiceEndpoints) ForEachShard(yield func(ShardKey, []*IstioEnd
 	}
 }
 
-func (s aggregateServiceEndpoints) CopyServiceAccounts() sets.String {
+func (s aggregateServiceEndpoints) ServiceAccounts() sets.String {
 	accounts := sets.New[string]()
 	for _, source := range s {
-		accounts.Merge(source.CopyServiceAccounts())
+		accounts.Merge(source.ServiceAccounts())
 	}
 	return accounts
 }
@@ -123,19 +123,19 @@ func (e *AggregateEndpointIndex) Shardz() map[string]map[string]*EndpointShards 
 
 // mergeEndpointShards combines exclusively owned debug copies.
 func mergeEndpointShards(dst, src *EndpointShards) {
-	if dst.Shards == nil {
-		dst.Shards = make(map[ShardKey][]*IstioEndpoint)
+	if dst.shards == nil {
+		dst.shards = make(map[ShardKey][]*IstioEndpoint)
 	}
-	for key, endpoints := range src.Shards {
+	for key, endpoints := range src.shards {
 		if features.EnableUnsafeAssertions {
-			if _, found := dst.Shards[key]; found {
+			if _, found := dst.shards[key]; found {
 				panic(fmt.Sprintf("duplicate endpoint shard %s across aggregate sources", key))
 			}
 		}
-		dst.Shards[key] = endpoints
+		dst.shards[key] = endpoints
 	}
-	if dst.ServiceAccounts == nil {
-		dst.ServiceAccounts = sets.New[string]()
+	if dst.serviceAccounts == nil {
+		dst.serviceAccounts = sets.New[string]()
 	}
-	dst.ServiceAccounts.Merge(src.ServiceAccounts)
+	dst.serviceAccounts.Merge(src.serviceAccounts)
 }

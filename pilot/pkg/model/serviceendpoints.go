@@ -26,8 +26,9 @@ type ServiceEndpoints interface {
 	// Endpoint slices are valid only during the callback. Endpoint objects are
 	// immutable and may be retained by the caller.
 	ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool)
-	// CopyServiceAccounts returns an independent copy of the tracked accounts.
-	CopyServiceAccounts() sets.String
+	// ServiceAccounts returns the tracked accounts. The returned set is read-only
+	// and may be retained by the caller; callers must copy it before making changes.
+	ServiceAccounts() sets.String
 }
 
 var (
@@ -47,8 +48,8 @@ func (s SingleShardEndpoints) ForEachShard(yield func(ShardKey, []*IstioEndpoint
 	yield(s.Key, s.Endpoints)
 }
 
-func (s SingleShardEndpoints) CopyServiceAccounts() sets.String {
-	return s.Accounts.Copy()
+func (s SingleShardEndpoints) ServiceAccounts() sets.String {
+	return s.Accounts
 }
 
 // CopyEndpoints takes a snapshot of all endpoints. As input, it takes a map of port name to number, to allow it to group

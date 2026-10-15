@@ -821,7 +821,7 @@ func TestEndpointFlipFlops(t *testing.T) {
 			if shard, ok := s.Discovery.Env.EndpointIndex.EndpointsForService("flipflop.com", ""); !ok {
 				t.Fatalf("Expected service key %s to be present in EndpointIndex. But missing %v", "flipflop.com", s.Discovery.Env.EndpointIndex.Shardz())
 			} else {
-				assert.Equal(t, sets.SortedList(shard.CopyServiceAccounts()), []string{tt.newSa})
+				assert.Equal(t, sets.SortedList(shard.ServiceAccounts()), []string{tt.newSa})
 			}
 		})
 	}
