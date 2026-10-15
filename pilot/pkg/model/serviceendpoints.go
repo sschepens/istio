@@ -20,8 +20,8 @@ import "istio.io/istio/pkg/util/sets"
 // Implementations may expose live data or an immutable snapshot. Separate method
 // calls are not guaranteed to observe the same version.
 type ServiceEndpoints interface {
-	// ForEachShard visits each shard once, ordered by provider then cluster, and stops
-	// when yield returns false. The callback must be short and must not mutate data
+	// ForEachShard visits each shard once in a stable implementation-defined order
+	// and stops when yield returns false. The callback must be short and must not mutate data
 	// or re-enter the index, since an implementation may hold a read lock.
 	// Endpoint slices are valid only during the callback. Endpoint objects are
 	// immutable and may be retained by the caller.

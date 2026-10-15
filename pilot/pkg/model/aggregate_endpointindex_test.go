@@ -15,9 +15,12 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
+	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/util/sets"
 )
@@ -42,6 +45,7 @@ func (s staticEndpointIndex) Shardz() map[string]map[string]*EndpointShards {
 }
 
 func TestAggregateEndpointIndex(t *testing.T) {
+	test.SetForTest(t, &features.EnableUnsafeAssertions, true)
 	kubeShard := ShardKey{Cluster: "cluster1", Provider: provider.Kubernetes}
 	externalShard := ShardKey{Cluster: "cluster1", Provider: provider.External}
 	mutable := NewMutableEndpointIndex(DisabledCache{})
@@ -93,25 +97,75 @@ func TestAggregateEndpointIndex(t *testing.T) {
 	remaining, found := index.EndpointsForService("svc", "ns")
 	assert.Equal(t, found, true)
 	assert.Equal(t, snapshotServiceEndpoints(remaining).Keys(), []ShardKey{externalShard})
-	// The earlier aggregate snapshot retains both shard contributions.
-	assert.Equal(t, snapshotServiceEndpoints(shards).Keys(), []ShardKey{externalShard, kubeShard})
+	// The existing wrapper delegates to the mutable source and sees the deletion.
+	assert.Equal(t, snapshotServiceEndpoints(shards).Keys(), []ShardKey{externalShard})
 }
 
-func TestAggregateEndpointIndexSharedShard(t *testing.T) {
-	key := ShardKey{Cluster: "cluster1"}
-	source := func(address string) EndpointIndex {
-		return staticEndpointIndex{"svc": {"ns": SingleShardEndpoints{
-			Key: key, Endpoints: []*IstioEndpoint{{Addresses: []string{address}}},
-		}}}
+func TestAggregateEndpointIndexDisjointShards(t *testing.T) {
+	key := ShardKey{Provider: provider.External, Cluster: "cluster1"}
+	for _, tt := range []struct {
+		name       string
+		other      ShardKey
+		assertions bool
+		duplicate  bool
+	}{
+		{"duplicate", key, true, true},
+		{"different provider", ShardKey{Provider: provider.Kubernetes, Cluster: key.Cluster}, true, false},
+		{"different cluster", ShardKey{Provider: key.Provider, Cluster: "cluster2"}, true, false},
+		{"assertions disabled", key, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			test.SetForTest(t, &features.EnableUnsafeAssertions, tt.assertions)
+			// Even empty endpoint slices claim shard ownership.
+			index := NewAggregateEndpointIndex(
+				staticEndpointIndex{"svc": {"ns": SingleShardEndpoints{Key: key}}},
+				staticEndpointIndex{"svc": {"ns": SingleShardEndpoints{Key: tt.other}}},
+			)
+			for name, read := range map[string]func(){
+				"iteration": func() {
+					view, found := index.EndpointsForService("svc", "ns")
+					assert.Equal(t, found, true)
+					view.ForEachShard(func(ShardKey, []*IstioEndpoint) bool { return true })
+				},
+				"debug": func() { index.Shardz() },
+			} {
+				t.Run(name, func(t *testing.T) {
+					var got any
+					func() {
+						defer func() { got = recover() }()
+						read()
+					}()
+					if tt.duplicate {
+						assert.Equal(t, got, any(fmt.Sprintf("duplicate endpoint shard %s across aggregate sources", key)))
+					} else {
+						assert.Equal(t, got, nil)
+					}
+				})
+			}
+		})
 	}
-	index := NewAggregateEndpointIndex(source("10.0.0.1"), source("10.0.0.2"))
-	shards, found := index.EndpointsForService("svc", "ns")
+}
+
+func TestAggregateEndpointIndexLiveView(t *testing.T) {
+	key := ShardKey{Cluster: "cluster1"}
+	mutable := NewMutableEndpointIndex(DisabledCache{})
+	mutable.UpdateServiceEndpoints(key, "svc", "ns", []*IstioEndpoint{
+		{Addresses: []string{"10.0.0.1"}, ServiceAccount: "old"},
+	}, false)
+	static := staticEndpointIndex{"svc": {"ns": SingleShardEndpoints{
+		Key: ShardKey{Cluster: "cluster2"}, Accounts: sets.New("static"),
+	}}}
+	index := NewAggregateEndpointIndex(mutable, static)
+	view, found := index.EndpointsForService("svc", "ns")
 	assert.Equal(t, found, true)
-	assert.Equal(t, len(snapshotServiceEndpoints(shards).Shards[key]), 2)
-	assert.Equal(t, snapshotServiceEndpoints(shards).Shards[key][0].Addresses, []string{"10.0.0.1"})
-	assert.Equal(t, snapshotServiceEndpoints(shards).Shards[key][1].Addresses, []string{"10.0.0.2"})
-	assert.Equal(t, index.Shardz()["svc"]["ns"].Shards, snapshotServiceEndpoints(shards).Shards)
-	assert.Equal(t, index.Shardz()["svc"]["ns"].ServiceAccounts, shards.CopyServiceAccounts())
+
+	// Updates after lookup must be observed when the wrapper is read, including
+	// tracked accounts. Lookup does not take a copy of either set of data.
+	mutable.UpdateServiceEndpoints(key, "svc", "ns", []*IstioEndpoint{
+		{Addresses: []string{"10.0.0.2"}, ServiceAccount: "new"},
+	}, false)
+	assert.Equal(t, snapshotServiceEndpoints(view).Shards[key][0].Addresses, []string{"10.0.0.2"})
+	assert.Equal(t, view.CopyServiceAccounts(), sets.New("new", "static"))
 }
 
 func TestAggregateEndpointIndexEmptyAndSingleSource(t *testing.T) {

@@ -40,8 +40,8 @@ func TestServiceEndpoints(t *testing.T) {
 	}
 	mutableView, _ := mutable.EndpointsForService("svc", "ns")
 	static := staticEndpointIndex{"svc": {"ns": single}}
-	// Reverse provider order to ensure aggregation orders across sources, rather
-	// than simply visiting each source's already ordered contributions.
+	// Source order takes precedence over provider order. Each source retains its
+	// own shard ordering.
 	aggregate := NewAggregateEndpointIndex(mutable, static)
 	aggregateView, _ := aggregate.EndpointsForService("svc", "ns")
 
@@ -53,7 +53,7 @@ func TestServiceEndpoints(t *testing.T) {
 	}{
 		{"single", single, []ShardKey{externalKey}, sets.New("tracked")},
 		{"mutable", mutableView, []ShardKey{kubeKey1, kubeKey2}, sets.New("sa")},
-		{"aggregate", aggregateView, []ShardKey{externalKey, kubeKey1, kubeKey2}, sets.New("tracked", "sa")},
+		{"aggregate", aggregateView, []ShardKey{kubeKey1, kubeKey2, externalKey}, sets.New("tracked", "sa")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var keys []ShardKey
