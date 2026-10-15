@@ -700,7 +700,7 @@ func (b *EndpointBuilder) snapshotShards(endpointIndex model.EndpointIndex) []*m
 	isClusterLocal := b.clusterLocal
 	var eps []*model.IstioEndpoint
 	// Implementations provide stable shard ordering and synchronize reads.
-	shards.ForEachShard(func(shardKey model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+	shards.ForEachShardOrdered(func(shardKey model.ShardKey, endpoints []*model.IstioEndpoint) bool {
 		if shardKey.Cluster != b.clusterID && (isClusterLocal || b.service.Attributes.NodeLocal) {
 			return true
 		}

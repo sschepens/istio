@@ -26,7 +26,7 @@ var _ EndpointIndex = (*AggregateEndpointIndex)(nil)
 
 // AggregateEndpointIndex combines reads from a fixed set of endpoint indexes.
 // Sources retain responsibility for cache invalidation and push notifications.
-// Sources must own disjoint shards. Iteration follows source order, preserving
+// Sources must own disjoint shards. Ordered iteration follows source order, preserving
 // each source's own shard order.
 type AggregateEndpointIndex struct {
 	indexes []EndpointIndex
@@ -72,6 +72,14 @@ type aggregateServiceEndpoints []ServiceEndpoints
 var _ ServiceEndpoints = aggregateServiceEndpoints(nil)
 
 func (s aggregateServiceEndpoints) ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool) {
+	s.forEachShard(false, yield)
+}
+
+func (s aggregateServiceEndpoints) ForEachShardOrdered(yield func(ShardKey, []*IstioEndpoint) bool) {
+	s.forEachShard(true, yield)
+}
+
+func (s aggregateServiceEndpoints) forEachShard(ordered bool, yield func(ShardKey, []*IstioEndpoint) bool) {
 	if features.EnableUnsafeAssertions {
 		seen := sets.New[ShardKey]()
 		next := yield
@@ -89,7 +97,11 @@ func (s aggregateServiceEndpoints) ForEachShard(yield func(ShardKey, []*IstioEnd
 		return keepGoing
 	}
 	for _, source := range s {
-		source.ForEachShard(visit)
+		if ordered {
+			source.ForEachShardOrdered(visit)
+		} else {
+			source.ForEachShard(visit)
+		}
 		if !keepGoing {
 			return
 		}

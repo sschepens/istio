@@ -20,12 +20,15 @@ import "istio.io/istio/pkg/util/sets"
 // Implementations may expose live data or an immutable snapshot. Separate method
 // calls are not guaranteed to observe the same version.
 type ServiceEndpoints interface {
-	// ForEachShard visits each shard once in a stable implementation-defined order
+	// ForEachShard visits each shard once in unspecified order
 	// and stops when yield returns false. The callback must be short and must not mutate data
 	// or re-enter the index, since an implementation may hold a read lock.
 	// Endpoint slices are valid only during the callback. Endpoint objects are
 	// immutable and may be retained by the caller.
 	ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool)
+	// ForEachShardOrdered is like ForEachShard, but visits shards in a stable
+	// implementation-defined order. The same callback and lifetime rules apply.
+	ForEachShardOrdered(yield func(ShardKey, []*IstioEndpoint) bool)
 	// ServiceAccounts returns the tracked accounts. The returned set is read-only
 	// and may be retained by the caller; callers must copy it before making changes.
 	ServiceAccounts() sets.String
@@ -46,6 +49,10 @@ type SingleShardEndpoints struct {
 
 func (s SingleShardEndpoints) ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool) {
 	yield(s.Key, s.Endpoints)
+}
+
+func (s SingleShardEndpoints) ForEachShardOrdered(yield func(ShardKey, []*IstioEndpoint) bool) {
+	s.ForEachShard(yield)
 }
 
 func (s SingleShardEndpoints) ServiceAccounts() sets.String {

@@ -58,7 +58,7 @@ func TestServiceEndpoints(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var keys []ShardKey
-			tt.view.ForEachShard(func(key ShardKey, eps []*IstioEndpoint) bool {
+			tt.view.ForEachShardOrdered(func(key ShardKey, eps []*IstioEndpoint) bool {
 				keys = append(keys, key)
 				assert.Equal(t, len(eps), 1)
 				return true
@@ -66,7 +66,7 @@ func TestServiceEndpoints(t *testing.T) {
 			assert.Equal(t, keys, tt.keys)
 
 			calls := 0
-			tt.view.ForEachShard(func(key ShardKey, _ []*IstioEndpoint) bool {
+			tt.view.ForEachShardOrdered(func(key ShardKey, _ []*IstioEndpoint) bool {
 				calls++
 				assert.Equal(t, key, tt.keys[0])
 				return false

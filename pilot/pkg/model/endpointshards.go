@@ -99,8 +99,19 @@ func (es *EndpointShards) keys() []ShardKey {
 	return keys
 }
 
-// ForEachShard visits shards in provider/cluster order while holding the read lock.
+// ForEachShard visits shards in unspecified order while holding the read lock.
 func (es *EndpointShards) ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool) {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+	for key, endpoints := range es.shards {
+		if !yield(key, endpoints) {
+			return
+		}
+	}
+}
+
+// ForEachShardOrdered visits shards in provider/cluster order while holding the read lock.
+func (es *EndpointShards) ForEachShardOrdered(yield func(ShardKey, []*IstioEndpoint) bool) {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
 	if len(es.shards) <= 1 {
