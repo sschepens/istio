@@ -22,7 +22,7 @@ import (
 	"istio.io/istio/pkg/util/sets"
 )
 
-func TestEndpointShardsWithoutMutex(t *testing.T) {
+func TestEndpointShardsDeepCopy(t *testing.T) {
 	shards := &EndpointShards{}
 	shards.Lock()
 	shards.Shards = map[ShardKey][]*IstioEndpoint{
@@ -36,9 +36,15 @@ func TestEndpointShardsWithoutMutex(t *testing.T) {
 	assert.Equal(t, len(CopyEndpoints(shards, map[string]int{"http": 80}, sets.New(80))[80]), 1)
 
 	copied := shards.DeepCopy()
-	assert.Equal(t, copied.mu == nil, true)
 	copied.Shards[ShardKey{Cluster: "c1"}][0].Addresses[0] = "10.0.0.2"
 	assert.Equal(t, shards.Shards[ShardKey{Cluster: "c1"}][0].Addresses[0], "10.0.0.1")
+
+	shards.Lock()
+	defer shards.Unlock()
+	if !copied.TryLock() {
+		t.Fatal("copy must have an independent, unlocked mutex")
+	}
+	copied.Unlock()
 }
 
 // Exercise the public read paths while mutable shards are updated. Run with -race
@@ -46,7 +52,6 @@ func TestEndpointShardsWithoutMutex(t *testing.T) {
 func TestEndpointShardsConcurrentUpdates(t *testing.T) {
 	index := NewMutableEndpointIndex(DisabledCache{})
 	shards, _ := index.GetOrCreateEndpointShard("svc", "ns")
-	assert.Equal(t, shards.mu != nil, true)
 
 	var wg sync.WaitGroup
 	for _, key := range []ShardKey{{Cluster: "c1"}, {Cluster: "c2"}} {
@@ -74,7 +79,6 @@ func TestEndpointShardsConcurrentUpdates(t *testing.T) {
 	wg.Wait()
 
 	copied := shards.DeepCopy()
-	assert.Equal(t, copied.mu == nil, true)
 	assert.Equal(t, len(copied.Shards), 2)
 	assert.Equal(t, copied.ServiceAccounts, sets.New("sa"))
 }
