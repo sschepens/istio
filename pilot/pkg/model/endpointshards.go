@@ -214,12 +214,11 @@ func (e *MutableEndpointIndex) shardsForService(serviceName, namespace string) (
 	return shards, ok
 }
 
-// getOrCreateEndpointShard returns the shards. The second return parameter will be true if this service was seen
-// for the first time.
-func (e *MutableEndpointIndex) getOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
+// getOrCreateEndpointShard returns the service's shards, creating them if needed.
+func (e *MutableEndpointIndex) getOrCreateEndpointShard(serviceName, namespace string) *EndpointShards {
 	// attempt to find endpoint shard with a read lock first, to avoid unnecessary lock contention. If not found, acquire a write lock and create it.
 	if ep, ok := e.shardsForService(serviceName, namespace); ok {
-		return ep, false
+		return ep
 	}
 
 	e.mu.Lock()
@@ -242,7 +241,7 @@ func (e *MutableEndpointIndex) getOrCreateEndpointShard(serviceName, namespace s
 		e.clearCacheForService(serviceName, namespace)
 	}
 
-	return ep, true
+	return ep
 }
 
 func (e *MutableEndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
@@ -349,7 +348,7 @@ func (e *MutableEndpointIndex) UpdateServiceEndpoints(
 	// trigger their own service update (a kind.ServiceEntry ConfigUpdate, see initRegistryEventHandlers)
 	// whenever a service is added, which re-initializes the service registry and picks these endpoints
 	// up. If the service is not known yet, an endpoint-only push is simply a no-op until it is.
-	ep, _ := e.getOrCreateEndpointShard(hostname, namespace)
+	ep := e.getOrCreateEndpointShard(hostname, namespace)
 
 	ep.mu.Lock()
 	defer ep.mu.Unlock()

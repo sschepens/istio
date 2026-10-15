@@ -44,7 +44,7 @@ func TestEndpointShardsSnapshot(t *testing.T) {
 // to detect missing synchronization between readers and writers.
 func TestEndpointShardsConcurrentUpdates(t *testing.T) {
 	index := NewMutableEndpointIndex(DisabledCache{})
-	shards, _ := index.getOrCreateEndpointShard("svc", "ns")
+	shards := index.getOrCreateEndpointShard("svc", "ns")
 
 	var wg sync.WaitGroup
 	for _, key := range []ShardKey{{Cluster: "c1"}, {Cluster: "c2"}} {
