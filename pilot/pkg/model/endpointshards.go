@@ -15,7 +15,6 @@
 package model
 
 import (
-	"encoding/json"
 	"sort"
 	"sync"
 
@@ -73,17 +72,11 @@ type EndpointShards struct {
 	serviceAccounts sets.String
 }
 
-// MarshalJSON preserves the debug representation while keeping the fields private.
-func (es *EndpointShards) MarshalJSON() ([]byte, error) {
-	es.mu.RLock()
-	defer es.mu.RUnlock()
-	return json.Marshal(struct {
-		Shards          map[ShardKey][]*IstioEndpoint
-		ServiceAccounts sets.String
-	}{
-		Shards:          es.shards,
-		ServiceAccounts: es.serviceAccounts,
-	})
+// EndpointShardsDump is an exclusively owned debug snapshot of a service's endpoints.
+// Its maps, slices, endpoint objects, and service accounts may be modified by the caller.
+type EndpointShardsDump struct {
+	Shards          map[ShardKey][]*IstioEndpoint
+	ServiceAccounts sets.String
 }
 
 // keys gives a sorted list of keys for EndpointShards.shards.
@@ -125,18 +118,18 @@ func (es *EndpointShards) ServiceAccounts() sets.String {
 	return es.serviceAccounts
 }
 
-// DeepCopy returns an exclusively owned copy with an independent mutex.
-func (es *EndpointShards) DeepCopy() *EndpointShards {
+// snapshot returns an exclusively owned debug snapshot under a single read lock.
+func (es *EndpointShards) snapshot() *EndpointShardsDump {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
-	res := &EndpointShards{
-		shards:          make(map[ShardKey][]*IstioEndpoint, len(es.shards)),
-		serviceAccounts: es.serviceAccounts.Copy(),
+	res := &EndpointShardsDump{
+		Shards:          make(map[ShardKey][]*IstioEndpoint, len(es.shards)),
+		ServiceAccounts: es.serviceAccounts.Copy(),
 	}
 	for k, v := range es.shards {
-		res.shards[k] = make([]*IstioEndpoint, 0, len(v))
-		for _, ep := range v {
-			res.shards[k] = append(res.shards[k], ep.DeepCopy())
+		res.Shards[k] = make([]*IstioEndpoint, len(v))
+		for i, ep := range v {
+			res.Shards[k][i] = ep.DeepCopy()
 		}
 	}
 	return res
@@ -147,7 +140,8 @@ func (es *EndpointShards) DeepCopy() *EndpointShards {
 type EndpointIndex interface {
 	EndpointsForService(serviceName, namespace string) (ServiceEndpoints, bool)
 	// Shardz returns a deep copy for debugging and tests. Callers may modify it.
-	Shardz() map[string]map[string]*EndpointShards
+	// Implementations can use SnapshotServiceEndpoints to construct each service's snapshot.
+	Shardz() map[string]map[string]*EndpointShardsDump
 }
 
 var _ EndpointIndex = (*MutableEndpointIndex)(nil)
@@ -181,14 +175,14 @@ func (e *MutableEndpointIndex) clearCacheForService(svc, ns string) {
 
 // Shardz returns a full deep copy of the global map of shards. This should be used only for testing
 // and debugging, as the cloning is expensive.
-func (e *MutableEndpointIndex) Shardz() map[string]map[string]*EndpointShards {
+func (e *MutableEndpointIndex) Shardz() map[string]map[string]*EndpointShardsDump {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	out := make(map[string]map[string]*EndpointShards, len(e.shardsBySvc))
+	out := make(map[string]map[string]*EndpointShardsDump, len(e.shardsBySvc))
 	for svcKey, v := range e.shardsBySvc {
-		out[svcKey] = make(map[string]*EndpointShards, len(v))
+		out[svcKey] = make(map[string]*EndpointShardsDump, len(v))
 		for nsKey, v := range v {
-			out[svcKey][nsKey] = v.DeepCopy()
+			out[svcKey][nsKey] = v.snapshot()
 		}
 	}
 	return out

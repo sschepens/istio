@@ -99,19 +99,19 @@ func (s aggregateServiceEndpoints) ServiceAccounts() sets.String {
 }
 
 // Shardz returns a deep copy of the combined indexes for debugging and tests.
-func (e *AggregateEndpointIndex) Shardz() map[string]map[string]*EndpointShards {
+func (e *AggregateEndpointIndex) Shardz() map[string]map[string]*EndpointShardsDump {
 	if len(e.indexes) == 1 {
 		return e.indexes[0].Shardz()
 	}
-	out := make(map[string]map[string]*EndpointShards)
+	out := make(map[string]map[string]*EndpointShardsDump)
 	for _, index := range e.indexes {
 		for service, byNamespace := range index.Shardz() {
 			if out[service] == nil {
-				out[service] = make(map[string]*EndpointShards)
+				out[service] = make(map[string]*EndpointShardsDump)
 			}
 			for namespace, shards := range byNamespace {
 				if existing := out[service][namespace]; existing != nil {
-					mergeEndpointShards(existing, shards)
+					mergeEndpointShardsDump(existing, shards)
 				} else {
 					out[service][namespace] = shards
 				}
@@ -121,21 +121,21 @@ func (e *AggregateEndpointIndex) Shardz() map[string]map[string]*EndpointShards 
 	return out
 }
 
-// mergeEndpointShards combines exclusively owned debug copies.
-func mergeEndpointShards(dst, src *EndpointShards) {
-	if dst.shards == nil {
-		dst.shards = make(map[ShardKey][]*IstioEndpoint)
+// mergeEndpointShardsDump combines exclusively owned debug copies.
+func mergeEndpointShardsDump(dst, src *EndpointShardsDump) {
+	if dst.Shards == nil {
+		dst.Shards = make(map[ShardKey][]*IstioEndpoint)
 	}
-	for key, endpoints := range src.shards {
+	for key, endpoints := range src.Shards {
 		if features.EnableUnsafeAssertions {
-			if _, found := dst.shards[key]; found {
+			if _, found := dst.Shards[key]; found {
 				panic(fmt.Sprintf("duplicate endpoint shard %s across aggregate sources", key))
 			}
 		}
-		dst.shards[key] = endpoints
+		dst.Shards[key] = endpoints
 	}
-	if dst.serviceAccounts == nil {
-		dst.serviceAccounts = sets.New[string]()
+	if dst.ServiceAccounts == nil {
+		dst.ServiceAccounts = sets.New[string]()
 	}
-	dst.serviceAccounts.Merge(src.serviceAccounts)
+	dst.ServiceAccounts.Merge(src.ServiceAccounts)
 }

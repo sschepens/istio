@@ -52,6 +52,25 @@ func (s SingleShardEndpoints) ServiceAccounts() sets.String {
 	return s.Accounts
 }
 
+// SnapshotServiceEndpoints creates an exclusively owned debug snapshot for EndpointIndex.Shardz.
+// It deep-copies endpoints and service accounts, so callers may modify the result.
+// For live sources, endpoints and service accounts may reflect different versions.
+func SnapshotServiceEndpoints(endpoints ServiceEndpoints) *EndpointShardsDump {
+	out := &EndpointShardsDump{
+		Shards:          make(map[ShardKey][]*IstioEndpoint),
+		ServiceAccounts: endpoints.ServiceAccounts().Copy(),
+	}
+	endpoints.ForEachShard(func(key ShardKey, eps []*IstioEndpoint) bool {
+		copied := make([]*IstioEndpoint, len(eps))
+		for i, ep := range eps {
+			copied[i] = ep.DeepCopy()
+		}
+		out.Shards[key] = copied
+		return true
+	})
+	return out
+}
+
 // CopyEndpoints takes a snapshot of all endpoints. As input, it takes a map of port name to number, to allow it to group
 // the results by service port number. This is a bit weird, but lets us efficiently construct the format the caller needs.
 func CopyEndpoints(endpoints ServiceEndpoints, portMap map[string]int, ports sets.Set[int]) map[int][]*IstioEndpoint {
