@@ -55,7 +55,6 @@ import (
 	kubeclient "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
-	"istio.io/istio/pkg/maps"
 	pm "istio.io/istio/pkg/model"
 	"istio.io/istio/pkg/slices"
 	istiotest "istio.io/istio/pkg/test"
@@ -2118,7 +2117,7 @@ func TestLocality(t *testing.T) {
 }
 
 func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port int) []*model.IstioEndpoint {
-	shards, ok := endpoints.ShardsForService(string(s.Hostname), s.Attributes.Namespace)
+	shards, ok := endpoints.EndpointsForService(string(s.Hostname), s.Attributes.Namespace)
 	if !ok {
 		return nil
 	}
@@ -2132,9 +2131,14 @@ func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port i
 	if pn == "" && port != 0 {
 		return nil
 	}
-	shards.RLock()
-	defer shards.RUnlock()
-	return slices.FilterInPlace(slices.Flatten(maps.Values(shards.Shards)), func(endpoint *model.IstioEndpoint) bool {
-		return pn == "" || endpoint.ServicePortName == pn
+	var result []*model.IstioEndpoint
+	shards.ForEachShard(func(_ model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+		for _, endpoint := range endpoints {
+			if pn == "" || endpoint.ServicePortName == pn {
+				result = append(result, endpoint)
+			}
+		}
+		return true
 	})
+	return result
 }

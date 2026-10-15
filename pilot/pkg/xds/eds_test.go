@@ -782,7 +782,7 @@ func TestEndpointFlipFlops(t *testing.T) {
 			}
 
 			// Validate that keys in service still exist in EndpointIndex - this prevents full push.
-			if _, ok := s.Discovery.Env.EndpointIndex.ShardsForService("flipflop.com", ""); !ok {
+			if _, ok := s.Discovery.Env.EndpointIndex.EndpointsForService("flipflop.com", ""); !ok {
 				t.Fatalf("Expected service key %s to be present in EndpointIndex. But missing %v", "flipflop.com", s.Discovery.Env.EndpointIndex.Shardz())
 			}
 
@@ -818,10 +818,10 @@ func TestEndpointFlipFlops(t *testing.T) {
 			}
 
 			testEndpoints("10.10.1.1", "outbound|8080||flipflop.com", adscConn, t)
-			if shard, ok := s.Discovery.Env.EndpointIndex.ShardsForService("flipflop.com", ""); !ok {
+			if shard, ok := s.Discovery.Env.EndpointIndex.EndpointsForService("flipflop.com", ""); !ok {
 				t.Fatalf("Expected service key %s to be present in EndpointIndex. But missing %v", "flipflop.com", s.Discovery.Env.EndpointIndex.Shardz())
 			} else {
-				assert.Equal(t, sets.SortedList(shard.ServiceAccounts), []string{tt.newSa})
+				assert.Equal(t, sets.SortedList(shard.CopyServiceAccounts()), []string{tt.newSa})
 			}
 		})
 	}
@@ -838,7 +838,7 @@ func TestDeleteService(t *testing.T) {
 
 	s.MemRegistry.RemoveService("removeservice.com")
 
-	if _, ok := s.Discovery.Env.EndpointIndex.ShardsForService("removeservice.com", ""); ok {
+	if _, ok := s.Discovery.Env.EndpointIndex.EndpointsForService("removeservice.com", ""); ok {
 		t.Fatalf("Expected service key %s to be deleted in EndpointIndex. But is still there %v",
 			"removeservice.com", s.Discovery.Env.EndpointIndex.Shardz())
 	}

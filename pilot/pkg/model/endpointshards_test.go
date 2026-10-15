@@ -33,7 +33,7 @@ func TestEndpointShardsWithoutMutex(t *testing.T) {
 	shards.RLock()
 	assert.Equal(t, shards.Keys(), []ShardKey{{Cluster: "c1"}})
 	shards.RUnlock()
-	assert.Equal(t, len(shards.CopyEndpoints(map[string]int{"http": 80}, sets.New(80))[80]), 1)
+	assert.Equal(t, len(CopyEndpoints(shards, map[string]int{"http": 80}, sets.New(80))[80]), 1)
 
 	copied := shards.DeepCopy()
 	assert.Equal(t, copied.mu == nil, true)
@@ -60,12 +60,15 @@ func TestEndpointShardsConcurrentUpdates(t *testing.T) {
 	}
 	wg.Go(func() {
 		for range 100 {
-			shards.CopyEndpoints(map[string]int{"http": 80}, sets.New(80))
+			CopyEndpoints(shards, map[string]int{"http": 80}, sets.New(80))
 			shards.DeepCopy()
-			shards.RLock()
-			shards.Keys()
-			shards.ServiceAccounts.Copy()
-			shards.RUnlock()
+			shards.ForEachShard(func(_ ShardKey, eps []*IstioEndpoint) bool {
+				for _, ep := range eps {
+					_ = ep.ServicePortName
+				}
+				return true
+			})
+			shards.CopyServiceAccounts()
 		}
 	})
 	wg.Wait()
@@ -237,8 +240,8 @@ func TestUpdateServiceEndpoints(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			endpoints.UpdateServiceEndpoints(tc.shardKey, tc.hostname, tc.namespace, tc.endpoints, true)
-			eps, _ := endpoints.ShardsForService(tc.hostname, tc.namespace)
-			assert.Equal(t, len(eps.Shards[tc.shardKey]), tc.expect)
+			eps, _ := endpoints.EndpointsForService(tc.hostname, tc.namespace)
+			assert.Equal(t, len(snapshotServiceEndpoints(eps).Shards[tc.shardKey]), tc.expect)
 		})
 	}
 }
@@ -261,9 +264,9 @@ func TestUpdateServiceEndpointsNewShardPushType(t *testing.T) {
 		assert.Equal(t, pushType, IncrementalPush)
 
 		// The endpoints are recorded regardless, so a later service update can pick them up.
-		eps, ok := endpoints.ShardsForService("foo.com", "foo")
+		eps, ok := endpoints.EndpointsForService("foo.com", "foo")
 		assert.Equal(t, ok, true)
-		assert.Equal(t, len(eps.Shards[shardKey]), 1)
+		assert.Equal(t, len(snapshotServiceEndpoints(eps).Shards[shardKey]), 1)
 	})
 
 	t.Run("new service account still requires a full push", func(t *testing.T) {

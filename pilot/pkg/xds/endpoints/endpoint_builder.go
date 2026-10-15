@@ -699,26 +699,19 @@ func (b *EndpointBuilder) snapshotShards(endpointIndex model.EndpointIndex) []*m
 	// and should, therefore, not be accessed from outside the cluster.
 	isClusterLocal := b.clusterLocal
 	var eps []*model.IstioEndpoint
-	shards.RLock()
-	defer shards.RUnlock()
-	// Extract shard keys so we can iterate in order. This ensures a stable EDS output.
-	keys := shards.Keys()
-	// The shards are updated independently, now need to filter and merge for this cluster
-	for _, shardKey := range keys {
-		if shardKey.Cluster != b.clusterID {
-			// If the downstream service is configured as cluster-local, only include endpoints that
-			// reside in the same cluster.
-			if isClusterLocal || b.service.Attributes.NodeLocal {
-				continue
-			}
+	// Implementations provide stable shard ordering and synchronize reads.
+	shards.ForEachShard(func(shardKey model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+		if shardKey.Cluster != b.clusterID && (isClusterLocal || b.service.Attributes.NodeLocal) {
+			return true
 		}
-		eps = append(eps, shards.Shards[shardKey]...)
-	}
+		eps = append(eps, endpoints...)
+		return true
+	})
 	return eps
 }
 
 // findShards returns the endpoints for a cluster
-func (b *EndpointBuilder) findShards(endpointIndex model.EndpointIndex) *model.EndpointShards {
+func (b *EndpointBuilder) findShards(endpointIndex model.EndpointIndex) model.ServiceEndpoints {
 	if b.service == nil {
 		log.Debugf("can not find the service for cluster %s", b.clusterName)
 		return nil
@@ -736,7 +729,7 @@ func (b *EndpointBuilder) findShards(endpointIndex model.EndpointIndex) *model.E
 		return nil
 	}
 
-	epShards, f := endpointIndex.ShardsForService(string(b.hostname), b.service.Attributes.Namespace)
+	epShards, f := endpointIndex.EndpointsForService(string(b.hostname), b.service.Attributes.Namespace)
 	if !f {
 		// Shouldn't happen here
 		log.Debugf("can not find the endpointShards for cluster %s", b.clusterName)

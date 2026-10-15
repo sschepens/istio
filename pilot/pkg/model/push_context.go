@@ -1568,17 +1568,15 @@ func (ps *PushContext) initServiceRegistry(env *Environment, configsUpdate sets.
 			ps.ServiceIndex.instancesByPort[svcKey] = instancesByPort
 		}
 		var accounts sets.String
-		shards, ok := env.EndpointIndex.ShardsForService(string(s.Hostname), s.Attributes.Namespace)
+		shards, ok := env.EndpointIndex.EndpointsForService(string(s.Hostname), s.Attributes.Namespace)
 		if ok {
-			endpoints := shards.CopyEndpoints(portMap, ports)
+			endpoints := CopyEndpoints(shards, portMap, ports)
 			// Iterate over the instances and add them to the service index to avoid overriding the existing port instances.
 			for port, instances := range endpoints {
 				instancesByPort[port] = instances
 			}
 			// Extract service accounts while we have the shards.
-			shards.RLock()
-			accounts = shards.ServiceAccounts.Copy()
-			shards.RUnlock()
+			accounts = shards.CopyServiceAccounts()
 		}
 		ps.addServiceAccounts(s, accounts)
 

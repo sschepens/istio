@@ -321,13 +321,18 @@ func Test_KubeSecretController_CredentialRotation(t *testing.T) {
 	assertShardPopulated := func(hostname, when string) {
 		t.Helper()
 		retry.UntilSuccessOrFail(t, func() error {
-			shards, ok := endpointIndex.ShardsForService(hostname, remoteSvcNS)
+			shards, ok := endpointIndex.EndpointsForService(hostname, remoteSvcNS)
 			if !ok {
 				return fmt.Errorf("endpoint shard %v for %s missing %s", shardKey, hostname, when)
 			}
-			shards.RLock()
-			defer shards.RUnlock()
-			if len(shards.Shards[shardKey]) == 0 {
+			populated := false
+			shards.ForEachShard(func(key model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+				if key == shardKey {
+					populated = len(endpoints) > 0
+				}
+				return true
+			})
+			if !populated {
 				return fmt.Errorf("endpoint shard %v for %s missing %s", shardKey, hostname, when)
 			}
 			return nil
@@ -430,13 +435,18 @@ func Test_KubeSecretController_CredentialRotation_StaleServiceAfterRotation(t *t
 	verifyControllers(t, mc, 2, "create remote controller")
 
 	retry.UntilSuccessOrFail(t, func() error {
-		shards, ok := endpointIndex.ShardsForService(vanishingHostname, vanishingSvcNS)
+		shards, ok := endpointIndex.EndpointsForService(vanishingHostname, vanishingSvcNS)
 		if !ok {
 			return fmt.Errorf("expected endpoint shard for %s to be populated before rotation", vanishingHostname)
 		}
-		shards.RLock()
-		defer shards.RUnlock()
-		if len(shards.Shards[shardKey]) == 0 {
+		populated := false
+		shards.ForEachShard(func(key model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+			if key == shardKey {
+				populated = len(endpoints) > 0
+			}
+			return true
+		})
+		if !populated {
 			return fmt.Errorf("expected endpoint shard for %s to be populated before rotation", vanishingHostname)
 		}
 		return nil
@@ -460,13 +470,18 @@ func Test_KubeSecretController_CredentialRotation_StaleServiceAfterRotation(t *t
 	// The deleted service's endpoint shard must eventually be cleaned up - it must not serve
 	// stale endpoints for a service that no longer exists in the remote cluster.
 	retry.UntilSuccessOrFail(t, func() error {
-		shards, ok := endpointIndex.ShardsForService(vanishingHostname, vanishingSvcNS)
+		shards, ok := endpointIndex.EndpointsForService(vanishingHostname, vanishingSvcNS)
 		if !ok {
 			return nil
 		}
-		shards.RLock()
-		defer shards.RUnlock()
-		if len(shards.Shards[shardKey]) == 0 {
+		populated := false
+		shards.ForEachShard(func(key model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+			if key == shardKey {
+				populated = len(endpoints) > 0
+			}
+			return true
+		})
+		if !populated {
 			return nil
 		}
 		return fmt.Errorf("stale endpoint shard %v for deleted service %s still present after rotation", shardKey, vanishingHostname)

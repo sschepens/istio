@@ -31,8 +31,6 @@ import (
 	"istio.io/istio/pilot/pkg/serviceregistry/util/xdsfake"
 	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/kube/mcs"
-	"istio.io/istio/pkg/maps"
-	"istio.io/istio/pkg/slices"
 	istiotest "istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/util/retry"
 )
@@ -217,7 +215,7 @@ func GetEndpoints(s *model.Service, endpoints model.EndpointIndex) []*model.Isti
 }
 
 func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port int) []*model.IstioEndpoint {
-	shards, ok := endpoints.ShardsForService(string(s.Hostname), s.Attributes.Namespace)
+	shards, ok := endpoints.EndpointsForService(string(s.Hostname), s.Attributes.Namespace)
 	if !ok {
 		return nil
 	}
@@ -231,11 +229,16 @@ func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port i
 	if pn == "" && port != 0 {
 		return nil
 	}
-	shards.RLock()
-	defer shards.RUnlock()
-	return slices.FilterInPlace(slices.Flatten(maps.Values(shards.Shards)), func(endpoint *model.IstioEndpoint) bool {
-		return pn == "" || endpoint.ServicePortName == pn
+	var result []*model.IstioEndpoint
+	shards.ForEachShard(func(_ model.ShardKey, endpoints []*model.IstioEndpoint) bool {
+		for _, endpoint := range endpoints {
+			if pn == "" || endpoint.ServicePortName == pn {
+				result = append(result, endpoint)
+			}
+		}
+		return true
 	})
+	return result
 }
 
 func (ec *serviceExportCacheImpl) checkServiceInstancesOrFail(t *testing.T, exported bool, endpoints model.EndpointIndex) {

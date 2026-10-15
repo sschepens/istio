@@ -120,33 +120,22 @@ func (es *EndpointShards) Keys() []ShardKey {
 	return keys
 }
 
-// CopyEndpoints takes a snapshot of all endpoints. As input, it takes a map of port name to number, to allow it to group
-// the results by service port number. This is a bit weird, but lets us efficiently construct the format the caller needs.
-func (es *EndpointShards) CopyEndpoints(portMap map[string]int, ports sets.Set[int]) map[int][]*IstioEndpoint {
+// ForEachShard visits shards in provider/cluster order while holding the read lock.
+func (es *EndpointShards) ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool) {
 	es.RLock()
 	defer es.RUnlock()
-	res := map[int][]*IstioEndpoint{}
-	for _, v := range es.Shards {
-		for _, ep := range v {
-			// use the port name as the key, unless LegacyClusterPortKey is set and takes precedence
-			// In EDS we match on port *name*. But for historical reasons, we match on port number for CDS.
-			var portNum int
-			if ep.LegacyClusterPortKey != 0 {
-				if !ports.Contains(ep.LegacyClusterPortKey) {
-					continue
-				}
-				portNum = ep.LegacyClusterPortKey
-			} else {
-				pn, f := portMap[ep.ServicePortName]
-				if !f {
-					continue
-				}
-				portNum = pn
-			}
-			res[portNum] = append(res[portNum], ep)
+	for _, key := range es.Keys() {
+		if !yield(key, es.Shards[key]) {
+			return
 		}
 	}
-	return res
+}
+
+// CopyServiceAccounts returns an independent copy of the tracked service accounts.
+func (es *EndpointShards) CopyServiceAccounts() sets.String {
+	es.RLock()
+	defer es.RUnlock()
+	return es.ServiceAccounts.Copy()
 }
 
 // DeepCopy returns an exclusively owned copy without a mutex.
@@ -167,10 +156,9 @@ func (es *EndpointShards) DeepCopy() *EndpointShards {
 }
 
 // EndpointIndex provides read access to endpoint shards across service registries.
-// Callers must not mutate returned shards or endpoints. Unless otherwise documented,
-// reads of EndpointShards must hold its read lock.
+// Implementations manage synchronization internally; returned endpoints are read-only.
 type EndpointIndex interface {
-	ShardsForService(serviceName, namespace string) (*EndpointShards, bool)
+	EndpointsForService(serviceName, namespace string) (ServiceEndpoints, bool)
 	// Shardz returns a deep copy for debugging and tests. Callers may modify it.
 	Shardz() map[string]map[string]*EndpointShards
 }
@@ -219,8 +207,16 @@ func (e *MutableEndpointIndex) Shardz() map[string]map[string]*EndpointShards {
 	return out
 }
 
-// ShardsForService returns the shards and true if they are found, or returns nil, false.
-func (e *MutableEndpointIndex) ShardsForService(serviceName, namespace string) (*EndpointShards, bool) {
+// EndpointsForService returns a synchronized view of the service's endpoints.
+func (e *MutableEndpointIndex) EndpointsForService(serviceName, namespace string) (ServiceEndpoints, bool) {
+	shards, found := e.shardsForService(serviceName, namespace)
+	if !found {
+		return nil, false
+	}
+	return shards, true
+}
+
+func (e *MutableEndpointIndex) shardsForService(serviceName, namespace string) (*EndpointShards, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	byNs, ok := e.shardsBySvc[serviceName]
@@ -235,7 +231,7 @@ func (e *MutableEndpointIndex) ShardsForService(serviceName, namespace string) (
 // for the first time.
 func (e *MutableEndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
 	// attempt to find endpoint shard with a read lock first, to avoid unnecessary lock contention. If not found, acquire a write lock and create it.
-	if ep, ok := e.ShardsForService(serviceName, namespace); ok {
+	if ep, ok := e.shardsForService(serviceName, namespace); ok {
 		return ep, false
 	}
 
