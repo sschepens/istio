@@ -44,20 +44,26 @@ func (e *AggregateEndpointIndex) EndpointsForService(serviceName, namespace stri
 	if len(e.indexes) == 1 {
 		return e.indexes[0].EndpointsForService(serviceName, namespace)
 	}
+	var first ServiceEndpoints
 	var sources aggregateServiceEndpoints
 	for _, index := range e.indexes {
-		if endpoints, found := index.EndpointsForService(serviceName, namespace); found {
-			sources = append(sources, endpoints)
+		if endpoints, ok := index.EndpointsForService(serviceName, namespace); ok {
+			if first == nil {
+				first = endpoints
+				continue
+			}
+			if sources == nil {
+				// Allocate only when multiple sources contribute to this service.
+				sources = aggregateServiceEndpoints{first, endpoints}
+			} else {
+				sources = append(sources, endpoints)
+			}
 		}
 	}
-	switch len(sources) {
-	case 0:
-		return nil, false
-	case 1:
-		return sources[0], true
-	default:
-		return sources, true
+	if sources == nil {
+		return first, first != nil
 	}
+	return sources, true
 }
 
 // aggregateServiceEndpoints delegates reads to the views obtained at lookup.
