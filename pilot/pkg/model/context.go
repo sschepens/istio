@@ -92,11 +92,13 @@ func NewEnvironment() *Environment {
 	} else {
 		cache = DisabledCache{}
 	}
+	endpoints := NewMutableEndpointIndex(cache)
 	return &Environment{
-		pushContext:    NewPushContext(),
-		Cache:          cache,
-		EndpointIndex:  NewEndpointIndex(cache),
-		AmbientIndexes: &NoopAmbientIndexes{},
+		pushContext:          NewPushContext(),
+		Cache:                cache,
+		EndpointIndex:        NewAggregateEndpointIndex(endpoints),
+		MutableEndpointIndex: endpoints,
+		AmbientIndexes:       &NoopAmbientIndexes{},
 	}
 }
 
@@ -151,9 +153,12 @@ type Environment struct {
 	// AgentgatewayController is the controller for agentgateway.
 	AgentgatewayController AgentgatewayController
 
-	// EndpointShards for a service. This is a global (per-server) list, built from
-	// incremental updates. This is keyed by service and namespace
-	EndpointIndex *EndpointIndex
+	// EndpointIndex provides the combined view of endpoints for XDS generation.
+	EndpointIndex EndpointIndex
+
+	// MutableEndpointIndex receives incremental updates from registries using XDSUpdater.
+	// It is also a source of the aggregate EndpointIndex.
+	MutableEndpointIndex *MutableEndpointIndex
 
 	// Cache for XDS resources.
 	Cache XdsCache

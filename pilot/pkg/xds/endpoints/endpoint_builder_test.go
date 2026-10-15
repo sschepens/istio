@@ -54,7 +54,7 @@ func TestWeightedWaypointEndpointsFailsClosed(t *testing.T) {
 		Ports:      model.PortList{{Port: 15008, Protocol: protocol.HTTP, Name: "hbone"}},
 	}
 
-	endpointIndex := model.NewEndpointIndex(model.NewXdsCache())
+	endpointIndex := model.NewMutableEndpointIndex(model.NewXdsCache())
 	wpShards, _ := endpointIndex.GetOrCreateEndpointShard("wp.ns.svc.cluster.local", "ns")
 	wpShards.Lock()
 	wpShards.Shards[model.ShardKey{Cluster: "cluster1"}] = []*model.IstioEndpoint{
@@ -791,7 +791,7 @@ func TestBuildClusterLoadAssignment_InferenceServicePortFiltering(t *testing.T) 
 				ConfigNamespace: "ns",
 			}
 
-			endpointIndex := model.NewEndpointIndex(model.NewXdsCache())
+			endpointIndex := model.NewMutableEndpointIndex(model.NewXdsCache())
 			shards, _ := endpointIndex.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
 			shards.Lock()
 			shards.Shards[model.ShardKey{Cluster: "cluster1"}] = []*model.IstioEndpoint{

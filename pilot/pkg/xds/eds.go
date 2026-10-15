@@ -37,7 +37,7 @@ func (s *DiscoveryServer) SvcUpdate(shard model.ShardKey, hostname string, names
 	// prevent memory leaks.
 	if event == model.EventDelete {
 		inboundServiceDeletes.Increment()
-		s.Env.EndpointIndex.DeleteServiceShard(shard, hostname, namespace, false)
+		s.Env.MutableEndpointIndex.DeleteServiceShard(shard, hostname, namespace, false)
 	} else {
 		inboundServiceUpdates.Increment()
 	}
@@ -53,7 +53,7 @@ func (s *DiscoveryServer) EDSUpdate(shard model.ShardKey, serviceName string, na
 ) {
 	inboundEDSUpdates.Increment()
 	// Update the endpoint shards
-	pushType := s.Env.EndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, true)
+	pushType := s.Env.MutableEndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, true)
 	if pushType != model.NoPush {
 		configKind := kind.Endpoints
 		if pushType == model.FullPush {
@@ -79,22 +79,22 @@ func (s *DiscoveryServer) EDSCacheUpdate(shard model.ShardKey, serviceName strin
 ) {
 	inboundEDSUpdates.Increment()
 	// Update the endpoint shards
-	s.Env.EndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, false)
+	s.Env.MutableEndpointIndex.UpdateServiceEndpoints(shard, serviceName, namespace, istioEndpoints, false)
 }
 
 func (s *DiscoveryServer) RemoveShard(shardKey model.ShardKey) {
-	s.Env.EndpointIndex.DeleteShard(shardKey)
+	s.Env.MutableEndpointIndex.DeleteShard(shardKey)
 }
 
 func (s *DiscoveryServer) PruneShard(shardKey model.ShardKey, keep map[string]sets.String) {
-	s.Env.EndpointIndex.PruneShard(shardKey, keep)
+	s.Env.MutableEndpointIndex.PruneShard(shardKey, keep)
 }
 
 // EdsGenerator implements the new Generate method for EDS, using the in-memory, optimized endpoint
 // storage in DiscoveryServer.
 type EdsGenerator struct {
 	Cache         model.XdsCache
-	EndpointIndex *model.EndpointIndex
+	EndpointIndex model.EndpointIndex
 }
 
 var _ model.XdsDeltaResourceGenerator = &EdsGenerator{}

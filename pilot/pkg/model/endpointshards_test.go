@@ -140,7 +140,7 @@ func TestUpdateServiceEndpoints(t *testing.T) {
 		c1Key = ShardKey{Cluster: "c1"}
 		c2Key = ShardKey{Cluster: "c2"}
 	)
-	endpoints := NewEndpointIndex(DisabledCache{})
+	endpoints := NewMutableEndpointIndex(DisabledCache{})
 
 	cluster1Endpoints := []*IstioEndpoint{
 		{Addresses: []string{"10.172.0.1"}, Namespace: "foo", HostName: "foo.com"},
@@ -198,7 +198,7 @@ func TestUpdateServiceEndpointsNewShardPushType(t *testing.T) {
 	shardKey := ShardKey{Cluster: "c1"}
 
 	t.Run("without service accounts", func(t *testing.T) {
-		endpoints := NewEndpointIndex(DisabledCache{})
+		endpoints := NewMutableEndpointIndex(DisabledCache{})
 		pushType := endpoints.UpdateServiceEndpoints(shardKey, "foo.com", "foo", []*IstioEndpoint{
 			{Addresses: []string{"10.172.0.1"}, Namespace: "foo", HostName: "foo.com"},
 		}, true)
@@ -211,7 +211,7 @@ func TestUpdateServiceEndpointsNewShardPushType(t *testing.T) {
 	})
 
 	t.Run("new service account still requires a full push", func(t *testing.T) {
-		endpoints := NewEndpointIndex(DisabledCache{})
+		endpoints := NewMutableEndpointIndex(DisabledCache{})
 		pushType := endpoints.UpdateServiceEndpoints(shardKey, "foo.com", "foo", []*IstioEndpoint{
 			{Addresses: []string{"10.172.0.1"}, Namespace: "foo", HostName: "foo.com", ServiceAccount: "sa"},
 		}, true)

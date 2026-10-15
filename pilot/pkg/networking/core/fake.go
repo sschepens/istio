@@ -147,7 +147,7 @@ func NewConfigGenTest(t test.Failer, opts TestOptions) *ConfigGenTest {
 
 	xdsUpdater := opts.XDSUpdater
 	if xdsUpdater == nil {
-		xdsUpdater = model.NewEndpointIndexUpdater(env.EndpointIndex)
+		xdsUpdater = model.NewEndpointIndexUpdater(env.MutableEndpointIndex)
 	}
 
 	virtualServiceController := model.NewVirtualServiceController(

@@ -22,14 +22,14 @@ import (
 
 // FakeEndpointIndexUpdater is an updater that will keep an EndpointIndex in sync. This is intended for tests only.
 type FakeEndpointIndexUpdater struct {
-	Index *EndpointIndex
+	Index *MutableEndpointIndex
 	// Optional; if set, we will trigger ConfigUpdates in response to EDS updates as appropriate
 	ConfigUpdateFunc func(req *PushRequest)
 }
 
 var _ XDSUpdater = &FakeEndpointIndexUpdater{}
 
-func NewEndpointIndexUpdater(ei *EndpointIndex) *FakeEndpointIndexUpdater {
+func NewEndpointIndexUpdater(ei *MutableEndpointIndex) *FakeEndpointIndexUpdater {
 	return &FakeEndpointIndexUpdater{Index: ei}
 }
 

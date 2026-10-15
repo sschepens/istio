@@ -67,7 +67,7 @@ func setupTest(t *testing.T) (model.ConfigStoreController, kubernetes.Interface,
 	t.Helper()
 	client := kubeclient.NewFakeClient()
 
-	endpoints := model.NewEndpointIndex(model.DisabledCache{})
+	endpoints := model.NewMutableEndpointIndex(model.DisabledCache{})
 	delegate := model.NewEndpointIndexUpdater(endpoints)
 	xdsUpdater := xdsfake.NewWithDelegate(delegate)
 	delegate.ConfigUpdateFunc = xdsUpdater.ConfigUpdate
@@ -1769,7 +1769,7 @@ func expectEndpoints(t *testing.T, s *xds.FakeDiscoveryServer, cluster string, e
 	}, retry.Converge(2), retry.Timeout(time.Second*2), retry.Delay(time.Millisecond*10))
 }
 
-func expectServiceEndpointsFromIndex(t *testing.T, ei *model.EndpointIndex, svc *model.Service, port int, expected []EndpointResponse) {
+func expectServiceEndpointsFromIndex(t *testing.T, ei model.EndpointIndex, svc *model.Service, port int, expected []EndpointResponse) {
 	t.Helper()
 	// The system is eventually consistent, so add some retries
 	retry.UntilSuccessOrFail(t, func() error {
@@ -2117,7 +2117,7 @@ func TestLocality(t *testing.T) {
 	}
 }
 
-func GetEndpointsForPort(s *model.Service, endpoints *model.EndpointIndex, port int) []*model.IstioEndpoint {
+func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port int) []*model.IstioEndpoint {
 	shards, ok := endpoints.ShardsForService(string(s.Hostname), s.Attributes.Namespace)
 	if !ok {
 		return nil

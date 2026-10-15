@@ -60,14 +60,14 @@ type FakeControllerOptions struct {
 
 type FakeController struct {
 	*Controller
-	Endpoints *model.EndpointIndex
+	Endpoints *model.MutableEndpointIndex
 }
 
 func NewFakeControllerWithOptions(t test.Failer, opts FakeControllerOptions) (*FakeController, *xdsfake.Updater) {
 	xdsUpdater := opts.XDSUpdater
-	var endpoints *model.EndpointIndex
+	var endpoints *model.MutableEndpointIndex
 	if xdsUpdater == nil {
-		endpoints = model.NewEndpointIndex(model.DisabledCache{})
+		endpoints = model.NewMutableEndpointIndex(model.DisabledCache{})
 		delegate := model.NewEndpointIndexUpdater(endpoints)
 		xdsUpdater = xdsfake.NewWithDelegate(delegate)
 	}

@@ -440,7 +440,7 @@ func (b *EndpointBuilder) FromServiceEndpointsByLocality() []*LocalityEndpoints 
 
 // BuildClusterLoadAssignment converts the shards for this EndpointBuilder's Service
 // into a ClusterLoadAssignment. Used for EDS.
-func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.EndpointIndex) *endpoint.ClusterLoadAssignment {
+func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex model.EndpointIndex) *endpoint.ClusterLoadAssignment {
 	svcPort := b.servicePort(b.port)
 	if svcPort == nil {
 		return buildEmptyClusterLoadAssignment(b.clusterName)
@@ -689,7 +689,7 @@ func (b *EndpointBuilder) filterIstioEndpoint(ep *model.IstioEndpoint) bool {
 }
 
 // snapshotShards into a local slice to avoid lock contention
-func (b *EndpointBuilder) snapshotShards(endpointIndex *model.EndpointIndex) []*model.IstioEndpoint {
+func (b *EndpointBuilder) snapshotShards(endpointIndex model.EndpointIndex) []*model.IstioEndpoint {
 	shards := b.findShards(endpointIndex)
 	if shards == nil {
 		return nil
@@ -718,7 +718,7 @@ func (b *EndpointBuilder) snapshotShards(endpointIndex *model.EndpointIndex) []*
 }
 
 // findShards returns the endpoints for a cluster
-func (b *EndpointBuilder) findShards(endpointIndex *model.EndpointIndex) *model.EndpointShards {
+func (b *EndpointBuilder) findShards(endpointIndex model.EndpointIndex) *model.EndpointShards {
 	if b.service == nil {
 		log.Debugf("can not find the service for cluster %s", b.clusterName)
 		return nil
@@ -1019,7 +1019,7 @@ func getSubSetLabels(dr *v1alpha3.DestinationRule, subsetName string) labels.Ins
 
 // For services that have a waypoint, we want to send to the waypoints rather than the service endpoints.
 // Lookup the service, find its waypoint, then find the waypoint's endpoints.
-func (b *EndpointBuilder) findServiceWaypoint(endpointIndex *model.EndpointIndex) ([]*model.IstioEndpoint, bool) {
+func (b *EndpointBuilder) findServiceWaypoint(endpointIndex model.EndpointIndex) ([]*model.IstioEndpoint, bool) {
 	// Currently we only support routers (gateways)
 	if b.nodeType != model.Router && !isEastWestGateway(b.proxy) {
 		// Currently only ingress and e/w gateway will call waypoints
@@ -1052,7 +1052,7 @@ func (b *EndpointBuilder) findServiceWaypoint(endpointIndex *model.EndpointIndex
 }
 
 // waypointEndpoints returns the endpoints of a waypoint's HBONE port.
-func (b *EndpointBuilder) waypointEndpoints(hostname string, port int, endpointIndex *model.EndpointIndex) []*model.IstioEndpoint {
+func (b *EndpointBuilder) waypointEndpoints(hostname string, port int, endpointIndex model.EndpointIndex) []*model.IstioEndpoint {
 	waypointClusterName := model.BuildSubsetKey(
 		model.TrafficDirectionOutbound,
 		"",
@@ -1067,7 +1067,7 @@ func (b *EndpointBuilder) waypointEndpoints(hostname string, port int, endpointI
 // weightedWaypointEndpoints scales endpoint weights so each waypoint gets its configured share.
 func (b *EndpointBuilder) weightedWaypointEndpoints(
 	svc model.ServiceWaypointInfo,
-	endpointIndex *model.EndpointIndex,
+	endpointIndex model.EndpointIndex,
 ) ([]*model.IstioEndpoint, bool) {
 	// Scale factor keeps the per-endpoint integer weights precise after dividing by the pod count.
 	const weightScale = 10000
@@ -1095,7 +1095,7 @@ func (b *EndpointBuilder) weightedWaypointEndpoints(
 	return out, true
 }
 
-func (b *EndpointBuilder) snapshotEndpointsForPort(endpointIndex *model.EndpointIndex) ([]*model.IstioEndpoint, bool) { //nolint:unparam
+func (b *EndpointBuilder) snapshotEndpointsForPort(endpointIndex model.EndpointIndex) ([]*model.IstioEndpoint, bool) { //nolint:unparam
 	svcPort := b.servicePort(b.port)
 	if svcPort == nil {
 		return nil, false

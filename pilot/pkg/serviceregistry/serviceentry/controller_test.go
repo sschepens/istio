@@ -129,7 +129,7 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	stop := test.NewStop(t)
 	go configController.Run(stop)
 
-	endpoints := model.NewEndpointIndex(model.DisabledCache{})
+	endpoints := model.NewMutableEndpointIndex(model.DisabledCache{})
 	delegate := model.NewEndpointIndexUpdater(endpoints)
 	xdsUpdater := xdsfake.NewWithDelegate(delegate)
 
@@ -2799,7 +2799,7 @@ func BenchmarkWorkloadInstanceHandler(b *testing.B) {
 	}
 }
 
-func GetEndpointsForPort(s *model.Service, endpoints *model.EndpointIndex, port int) []*model.IstioEndpoint {
+func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port int) []*model.IstioEndpoint {
 	shards, ok := endpoints.ShardsForService(string(s.Hostname), s.Attributes.Namespace)
 	if !ok {
 		return nil

@@ -278,7 +278,7 @@ func Test_KubeSecretController_CredentialRotation(t *testing.T) {
 	remoteClusterID := cluster.ID("test-remote-cluster-1")
 	shardKey := model.ShardKey{Cluster: remoteClusterID, Provider: provider.Kubernetes}
 
-	endpointIndex := model.NewEndpointIndex(model.DisabledCache{})
+	endpointIndex := model.NewMutableEndpointIndex(model.DisabledCache{})
 	xdsUpdater := model.NewEndpointIndexUpdater(endpointIndex)
 
 	mockserviceController := newMockserviceController()
@@ -390,7 +390,7 @@ func Test_KubeSecretController_CredentialRotation_StaleServiceAfterRotation(t *t
 	remoteClusterID := cluster.ID("test-remote-cluster-1")
 	shardKey := model.ShardKey{Cluster: remoteClusterID, Provider: provider.Kubernetes}
 
-	endpointIndex := model.NewEndpointIndex(model.DisabledCache{})
+	endpointIndex := model.NewMutableEndpointIndex(model.DisabledCache{})
 	xdsUpdater := model.NewEndpointIndexUpdater(endpointIndex)
 
 	mockserviceController := newMockserviceController()

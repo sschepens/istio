@@ -135,8 +135,20 @@ func (es *EndpointShards) DeepCopy() *EndpointShards {
 	return res
 }
 
-// EndpointIndex is a mutex protected index of endpoint shards
-type EndpointIndex struct {
+// EndpointIndex provides read access to endpoint shards across service registries.
+// Callers must not mutate returned shards or endpoints. Unless otherwise documented,
+// reads of EndpointShards must hold its read lock.
+type EndpointIndex interface {
+	ShardsForService(serviceName, namespace string) (*EndpointShards, bool)
+	// Shardz returns a deep copy for debugging and tests. Callers may modify it.
+	Shardz() map[string]map[string]*EndpointShards
+}
+
+var _ EndpointIndex = (*MutableEndpointIndex)(nil)
+
+// MutableEndpointIndex is a mutex protected index populated by incremental registry updates.
+// Mutation and the associated cache invalidation remain local to this implementation.
+type MutableEndpointIndex struct {
 	mu sync.RWMutex
 	// keyed by svc then ns
 	shardsBySvc map[string]map[string]*EndpointShards
@@ -144,15 +156,16 @@ type EndpointIndex struct {
 	cache XdsCache
 }
 
-func NewEndpointIndex(cache XdsCache) *EndpointIndex {
-	return &EndpointIndex{
+// NewMutableEndpointIndex creates a mutable endpoint index.
+func NewMutableEndpointIndex(cache XdsCache) *MutableEndpointIndex {
+	return &MutableEndpointIndex{
 		shardsBySvc: make(map[string]map[string]*EndpointShards),
 		cache:       cache,
 	}
 }
 
 // must be called with lock
-func (e *EndpointIndex) clearCacheForService(svc, ns string) {
+func (e *MutableEndpointIndex) clearCacheForService(svc, ns string) {
 	e.cache.Clear(sets.Set[ConfigKey]{{
 		Kind:      kind.ServiceEntry,
 		Name:      svc,
@@ -162,7 +175,7 @@ func (e *EndpointIndex) clearCacheForService(svc, ns string) {
 
 // Shardz returns a full deep copy of the global map of shards. This should be used only for testing
 // and debugging, as the cloning is expensive.
-func (e *EndpointIndex) Shardz() map[string]map[string]*EndpointShards {
+func (e *MutableEndpointIndex) Shardz() map[string]map[string]*EndpointShards {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	out := make(map[string]map[string]*EndpointShards, len(e.shardsBySvc))
@@ -176,7 +189,7 @@ func (e *EndpointIndex) Shardz() map[string]map[string]*EndpointShards {
 }
 
 // ShardsForService returns the shards and true if they are found, or returns nil, false.
-func (e *EndpointIndex) ShardsForService(serviceName, namespace string) (*EndpointShards, bool) {
+func (e *MutableEndpointIndex) ShardsForService(serviceName, namespace string) (*EndpointShards, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	byNs, ok := e.shardsBySvc[serviceName]
@@ -189,7 +202,7 @@ func (e *EndpointIndex) ShardsForService(serviceName, namespace string) (*Endpoi
 
 // GetOrCreateEndpointShard returns the shards. The second return parameter will be true if this service was seen
 // for the first time.
-func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
+func (e *MutableEndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) (*EndpointShards, bool) {
 	// attempt to find endpoint shard with a read lock first, to avoid unnecessary lock contention. If not found, acquire a write lock and create it.
 	if ep, ok := e.ShardsForService(serviceName, namespace); ok {
 		return ep, false
@@ -218,13 +231,13 @@ func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) 
 	return ep, true
 }
 
-func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
+func (e *MutableEndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deleteServiceInner(shard, serviceName, namespace, preserveKeys)
 }
 
-func (e *EndpointIndex) DeleteShard(shardKey ShardKey) {
+func (e *MutableEndpointIndex) DeleteShard(shardKey ShardKey) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for svc, shardsByNamespace := range e.shardsBySvc {
@@ -243,7 +256,7 @@ func (e *EndpointIndex) DeleteShard(shardKey ShardKey) {
 // clean up shard entries for services that no longer exist in the source: such a service never
 // generates a delete event of its own, since a full resync only lists what currently exists -
 // there's nothing left to diff a fresh list against.
-func (e *EndpointIndex) PruneShard(shardKey ShardKey, keep map[string]sets.String) {
+func (e *MutableEndpointIndex) PruneShard(shardKey ShardKey, keep map[string]sets.String) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for svc, shardsByNamespace := range e.shardsBySvc {
@@ -257,7 +270,7 @@ func (e *EndpointIndex) PruneShard(shardKey ShardKey, keep map[string]sets.Strin
 }
 
 // must be called with lock
-func (e *EndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
+func (e *MutableEndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
 	if e.shardsBySvc[serviceName] == nil ||
 		e.shardsBySvc[serviceName][namespace] == nil {
 		return
@@ -294,7 +307,7 @@ const (
 // UpdateServiceEndpoints updates EndpointShards data by clusterID, hostname, IstioEndpoints.
 // It also tracks the changes to ServiceAccounts. It returns whether endpoints need to be pushed and
 // it also returns if they need to be pushed whether a full push is needed or incremental push is sufficient.
-func (e *EndpointIndex) UpdateServiceEndpoints(
+func (e *MutableEndpointIndex) UpdateServiceEndpoints(
 	shard ShardKey,
 	hostname string,
 	namespace string,

@@ -4310,26 +4310,14 @@ func TestInstancesByPort(t *testing.T) {
 		services: []*Service{svc5_1, svc5_2},
 	}
 
-	env.EndpointIndex.shardsBySvc = map[string]map[string]*EndpointShards{
-		svc5_1.Hostname.String(): {
-			svc5_1.Attributes.Namespace: {
-				Shards: map[ShardKey][]*IstioEndpoint{
-					{Cluster: "Kubernetes", Provider: provider.External}: {
-						&IstioEndpoint{
-							Addresses:       []string{"1.1.1.1"},
-							EndpointPort:    7000,
-							ServicePortName: "uds",
-						},
-						&IstioEndpoint{
-							Addresses:       []string{"1.1.1.2", "2001:1::2"},
-							EndpointPort:    8000,
-							ServicePortName: "uds",
-						},
-					},
-				},
-			},
-		},
-	}
+	env.MutableEndpointIndex.UpdateServiceEndpoints(
+		ShardKey{Cluster: "Kubernetes", Provider: provider.External},
+		svc5_1.Hostname.String(), svc5_1.Attributes.Namespace,
+		[]*IstioEndpoint{
+			{Addresses: []string{"1.1.1.1"}, EndpointPort: 7000, ServicePortName: "uds"},
+			{Addresses: []string{"1.1.1.2", "2001:1::2"}, EndpointPort: 8000, ServicePortName: "uds"},
+		}, false,
+	)
 
 	ps.initServiceRegistry(env, nil)
 	instancesByPort := ps.ServiceIndex.instancesByPort[svc5_1.Key()]

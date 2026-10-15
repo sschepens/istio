@@ -759,7 +759,7 @@ func TestEndpointsByNetworkFilter_ProxyWithEmptyNetwork(t *testing.T) {
 	})
 	ds.Env().InitNetworksManager(ds.Discovery)
 
-	shards := model.NewEndpointIndex(model.NewXdsCache())
+	shards := model.NewMutableEndpointIndex(model.NewXdsCache())
 	svc, _ := shards.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
 	svc.Lock()
 	svc.Shards[model.ShardKey{Cluster: constants.DefaultClusterName}] = []*model.IstioEndpoint{
@@ -1550,7 +1550,7 @@ func TestEndpointsByNetworkFilter_GatewayIPFamily(t *testing.T) {
 	test.SetForTest(t, &features.PreferHBONESend, true)
 
 	// Local network1 with an IPv4 gateway, remote network2 with dualstack gateways.
-	newEnv := func(t *testing.T, gateways []model.NetworkGateway) (*xds.FakeDiscoveryServer, *model.EndpointIndex) {
+	newEnv := func(t *testing.T, gateways []model.NetworkGateway) (*xds.FakeDiscoveryServer, model.EndpointIndex) {
 		ds := xds.NewFakeDiscoveryServer(t, xds.FakeOptions{
 			Services: []*model.Service{{
 				Hostname:   "example.ns.svc.cluster.local",
@@ -1561,7 +1561,7 @@ func TestEndpointsByNetworkFilter_GatewayIPFamily(t *testing.T) {
 		})
 		ds.Env().InitNetworksManager(ds.Discovery)
 
-		shards := model.NewEndpointIndex(model.NewXdsCache())
+		shards := model.NewMutableEndpointIndex(model.NewXdsCache())
 		svc, _ := shards.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
 		svc.Lock()
 		svc.Shards[model.ShardKey{Cluster: "cluster2"}] = []*model.IstioEndpoint{
@@ -1694,7 +1694,7 @@ func TestEndpointsByNetworkFilter_GatewayIPFamily_Ambient(t *testing.T) {
 	})
 	ds.Env().InitNetworksManager(ds.Discovery)
 
-	shards := model.NewEndpointIndex(model.NewXdsCache())
+	shards := model.NewMutableEndpointIndex(model.NewXdsCache())
 	svc, _ := shards.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
 	svc.Lock()
 	svc.Shards[model.ShardKey{Cluster: "cluster2"}] = []*model.IstioEndpoint{
@@ -1967,7 +1967,7 @@ func environment(t test.Failer, c ...config.Config) *xds.FakeDiscoveryServer {
 //   - 1 endpoints in network4
 //
 // All endpoints are part of service example.ns.svc.cluster.local on port 80 (http).
-func testShards() *model.EndpointIndex {
+func testShards() model.EndpointIndex {
 	shards := &model.EndpointShards{Shards: map[model.ShardKey][]*model.IstioEndpoint{
 		// network1 has one endpoint in each cluster
 		{Cluster: "cluster1a"}: {
@@ -2023,7 +2023,7 @@ func testShards() *model.EndpointIndex {
 		}
 	}
 	// convert to EndpointIndex
-	index := model.NewEndpointIndex(model.NewXdsCache())
+	index := model.NewMutableEndpointIndex(model.NewXdsCache())
 	for shardKey, testEps := range shards.Shards {
 		svc, _ := index.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
 		svc.Lock()
@@ -2033,7 +2033,7 @@ func testShards() *model.EndpointIndex {
 	return index
 }
 
-func newEndpointIndex(t *testing.T, eps []*model.IstioEndpoint) *model.EndpointIndex {
+func newEndpointIndex(t *testing.T, eps []*model.IstioEndpoint) model.EndpointIndex {
 	t.Helper()
 
 	shards := &model.EndpointShards{Shards: map[model.ShardKey][]*model.IstioEndpoint{}}
@@ -2064,7 +2064,7 @@ func newEndpointIndex(t *testing.T, eps []*model.IstioEndpoint) *model.EndpointI
 	}
 
 	// convert to EndpointIndex
-	index := model.NewEndpointIndex(model.NewXdsCache())
+	index := model.NewMutableEndpointIndex(model.NewXdsCache())
 	for shardKey, testEps := range shards.Shards {
 		svc, _ := index.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
 		svc.Lock()

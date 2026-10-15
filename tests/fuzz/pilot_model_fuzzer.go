@@ -203,7 +203,7 @@ func FuzzInitContext(data []byte) int {
 	env.ServiceDiscovery = sd
 
 	env.Watcher = meshwatcher.NewTestWatcher(m)
-	env.EndpointIndex = model.NewEndpointIndex(model.DisabledCache{})
+	env.EndpointIndex = model.NewMutableEndpointIndex(model.DisabledCache{})
 	env.Init()
 	pc := model.NewPushContext()
 	pc.InitContext(env, nil, nil)

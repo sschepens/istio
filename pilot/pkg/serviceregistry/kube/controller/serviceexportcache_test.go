@@ -116,7 +116,7 @@ func newServiceExport() *unstructured.Unstructured {
 	return toUnstructured(se)
 }
 
-func newTestServiceExportCache(t *testing.T, clusterLocalMode ClusterLocalMode) (*serviceExportCacheImpl, *model.EndpointIndex) {
+func newTestServiceExportCache(t *testing.T, clusterLocalMode ClusterLocalMode) (*serviceExportCacheImpl, model.EndpointIndex) {
 	t.Helper()
 
 	istiotest.SetForTest(t, &features.EnableMCSServiceDiscovery, true)
@@ -201,7 +201,7 @@ func (ec *serviceExportCacheImpl) waitForXDS(t *testing.T, exported bool) {
 	}, serviceExportTimeout)
 }
 
-func (ec *serviceExportCacheImpl) getEndpoint(endpoints *model.EndpointIndex) *model.IstioEndpoint {
+func (ec *serviceExportCacheImpl) getEndpoint(endpoints model.EndpointIndex) *model.IstioEndpoint {
 	svcs := ec.Services()
 	for _, s := range svcs {
 		ep := GetEndpoints(s, endpoints)
@@ -212,11 +212,11 @@ func (ec *serviceExportCacheImpl) getEndpoint(endpoints *model.EndpointIndex) *m
 	return nil
 }
 
-func GetEndpoints(s *model.Service, endpoints *model.EndpointIndex) []*model.IstioEndpoint {
+func GetEndpoints(s *model.Service, endpoints model.EndpointIndex) []*model.IstioEndpoint {
 	return GetEndpointsForPort(s, endpoints, 0)
 }
 
-func GetEndpointsForPort(s *model.Service, endpoints *model.EndpointIndex, port int) []*model.IstioEndpoint {
+func GetEndpointsForPort(s *model.Service, endpoints model.EndpointIndex, port int) []*model.IstioEndpoint {
 	shards, ok := endpoints.ShardsForService(string(s.Hostname), s.Attributes.Namespace)
 	if !ok {
 		return nil
@@ -238,14 +238,14 @@ func GetEndpointsForPort(s *model.Service, endpoints *model.EndpointIndex, port 
 	})
 }
 
-func (ec *serviceExportCacheImpl) checkServiceInstancesOrFail(t *testing.T, exported bool, endpoints *model.EndpointIndex) {
+func (ec *serviceExportCacheImpl) checkServiceInstancesOrFail(t *testing.T, exported bool, endpoints model.EndpointIndex) {
 	t.Helper()
 	if err := ec.checkEndpoints(exported, endpoints); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (ec *serviceExportCacheImpl) checkEndpoints(exported bool, endpoints *model.EndpointIndex) error {
+func (ec *serviceExportCacheImpl) checkEndpoints(exported bool, endpoints model.EndpointIndex) error {
 	ep := ec.getEndpoint(endpoints)
 	if ep == nil {
 		return fmt.Errorf("expected an endpoint, found none")
