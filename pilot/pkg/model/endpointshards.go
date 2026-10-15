@@ -103,6 +103,12 @@ func (es *EndpointShards) keys() []ShardKey {
 func (es *EndpointShards) ForEachShard(yield func(ShardKey, []*IstioEndpoint) bool) {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
+	if len(es.shards) <= 1 {
+		for key, endpoints := range es.shards {
+			yield(key, endpoints)
+		}
+		return
+	}
 	for _, key := range es.keys() {
 		if !yield(key, es.shards[key]) {
 			return
