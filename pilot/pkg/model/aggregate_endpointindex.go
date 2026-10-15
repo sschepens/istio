@@ -100,6 +100,9 @@ func (s aggregateServiceEndpoints) CopyServiceAccounts() sets.String {
 
 // Shardz returns a deep copy of the combined indexes for debugging and tests.
 func (e *AggregateEndpointIndex) Shardz() map[string]map[string]*EndpointShards {
+	if len(e.indexes) == 1 {
+		return e.indexes[0].Shardz()
+	}
 	out := make(map[string]map[string]*EndpointShards)
 	for _, index := range e.indexes {
 		for service, byNamespace := range index.Shardz() {
