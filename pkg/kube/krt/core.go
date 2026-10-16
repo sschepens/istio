@@ -247,6 +247,9 @@ type (
 	TransformationEmpty[T any] func(ctx HandlerContext) *T
 	// TransformationSingle represents a one-to-one relationship between I and O.
 	TransformationSingle[I, O any] func(ctx HandlerContext, i I) *O
+	// TransformationStatefulSingle derives zero or one output using the previously published output for this input.
+	// The previous output is nil when none exists and must not be mutated.
+	TransformationStatefulSingle[I, O any] func(ctx HandlerContext, i I, previous *O) *O
 	// TransformationMulti represents a one-to-many relationship between I and O.
 	TransformationMulti[I, O any] func(ctx HandlerContext, i I) []O
 	// TransformationMultiStatus represents a one-to-many relationship between I and O, along with an output Status about I.

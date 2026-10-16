@@ -63,7 +63,7 @@ func NewStatusManyCollection[I controllers.Object, IStatus, O any](
 			status.ConditionalUpdateObject(cs)
 		}
 		return objs
-	}, o, cleanupOnRemoval)
+	}, nil, o, cleanupOnRemoval)
 	go func() {
 		// Status collection is not synced until the parent is synced.
 		// We could almost just pass the primary.Syncer(), but that is circular so doesn't really work.

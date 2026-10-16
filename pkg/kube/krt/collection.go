@@ -228,6 +228,9 @@ type manyCollection[I, O any] struct {
 	eventHandlers *handlerSet[O]
 
 	transformation TransformationMulti[I, O]
+	// statefulTransformation is used only for zero-or-one pointer outputs. O is the stored pointer type,
+	// so its zero value represents an input without a published output.
+	statefulTransformation func(HandlerContext, I, O) []O
 
 	// augmentation allows transforming an object into another for usage throughout the library. See WithObjectAugmentation.
 	augmentation func(a any) any
@@ -474,7 +477,13 @@ func (h *manyCollection[I, O]) handleChangedPrimaryInputEvents(items []Event[I])
 		iKey := getTypedKey(i)
 
 		ctx := &collectionDependencyTracker[I, O]{manyCollection: h, key: iKey}
-		results := slices.GroupUnique(h.transformation(ctx, i), getTypedKey[O])
+		var transformed []O
+		if h.statefulTransformation != nil {
+			transformed = h.statefulTransformation(ctx, i, h.previousOutput(iKey))
+		} else {
+			transformed = h.transformation(ctx, i)
+		}
+		results := slices.GroupUnique(transformed, getTypedKey[O])
 		recomputedResults[idx] = results
 		// Store new dependency state, to insert in the next loop under the lock
 		pendingDepStateUpdates[idx] = ctx
@@ -573,6 +582,22 @@ func (h *manyCollection[I, O]) handleChangedPrimaryInputEvents(items []Event[I])
 	h.eventHandlers.Distribute(events, !h.HasSynced())
 }
 
+// previousOutput returns the output owned by this input, whose key need not match the input key.
+// The queue serializes transformations and publication; release mu before invoking user code so Fetch is safe.
+// All transformations in a batch observe the state published before that batch.
+func (h *manyCollection[I, O]) previousOutput(key Key[I]) (previous O) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	keys := h.collectionState.mappings[key]
+	if len(keys) > 1 {
+		panic("stateful transformation requires at most one output per input")
+	}
+	for outputKey := range keys {
+		return h.collectionState.outputs[outputKey]
+	}
+	return previous
+}
+
 func (h *manyCollection[I, O]) Metadata() Metadata {
 	return h.metadata
 }
@@ -594,7 +619,7 @@ func NewCollection[I, O any](c Collection[I], hf TransformationSingle[I, O], opt
 		// NOTE: this will print Collection[nil, nil] if I or O are interfaces
 		o.name = fmt.Sprintf("Collection[%v,%v]", ptr.TypeName[I](), ptr.TypeName[O]())
 	}
-	return newCollection(newManyCollection(c, hm, o, nil))
+	return newCollection(newManyCollection(c, hm, nil, o, nil))
 }
 
 // NewPointerCollection applies a zero-or-one transformation and stores the exact
@@ -613,7 +638,34 @@ func NewPointerCollection[I, O any](c Collection[I], hf TransformationSingle[I, 
 	if o.name == "" {
 		o.name = fmt.Sprintf("PointerCollection[%v,%v]", ptr.TypeName[I](), ptr.TypeName[O]())
 	}
-	return newCollection(newManyCollection(c, hm, o, nil))
+	return newCollection(newManyCollection(c, hm, nil, o, nil))
+}
+
+// NewStatefulPointerCollection derives zero or one output per input, passing the previously
+// published output for that input to the transformation. The input and output keys may differ.
+// Previous is nil if no output exists, including after returning nil or processing an input deletion.
+// Previous and all objects reachable from it are immutable; allocate a new output when changing it.
+//
+// Primary and secondary changes use the normal collection queue. Previous is the state published
+// before the current batch, not a tentative result from another invocation in that batch. As with
+// other collections, upstream events may be coalesced; this is not a fold over every upstream event.
+//
+// Returning nil removes the output. DiscardResult retains its usual semantics. Input deletion
+// removes the output and dependencies without invoking the transformation. Reading previous does
+// not register a dependency; Fetch still records dependencies even when the returned output is equal.
+func NewStatefulPointerCollection[I, O any](c Collection[I], hf TransformationStatefulSingle[I, O], opts ...CollectionOption) Collection[*O] {
+	hm := func(ctx HandlerContext, i I, previous *O) []*O {
+		res := hf(ctx, i, previous)
+		if res == nil {
+			return nil
+		}
+		return []*O{res}
+	}
+	o := buildCollectionOptions(opts...)
+	if o.name == "" {
+		o.name = fmt.Sprintf("StatefulPointerCollection[%v,%v]", ptr.TypeName[I](), ptr.TypeName[O]())
+	}
+	return newCollection(newManyCollection[I, *O](c, nil, hm, o, nil))
 }
 
 // NewManyCollection transforms a Collection[I] to a Collection[O] by applying the provided transformation function.
@@ -624,21 +676,23 @@ func NewManyCollection[I, O any](c Collection[I], hf TransformationMulti[I, O], 
 	if o.name == "" {
 		o.name = fmt.Sprintf("ManyCollection[%v,%v]", ptr.TypeName[I](), ptr.TypeName[O]())
 	}
-	return newCollection(newManyCollection[I, O](c, hf, o, nil))
+	return newCollection(newManyCollection[I, O](c, hf, nil, o, nil))
 }
 
 func newManyCollection[I, O any](
 	cc Collection[I],
 	hf TransformationMulti[I, O],
+	stateful func(HandlerContext, I, O) []O,
 	opts collectionOptions,
 	onPrimaryInputEventHandler func([]Event[I]),
 ) internalCollection[O] {
 	h := &manyCollection[I, O]{
-		transformation: hf,
-		collectionName: opts.name,
-		id:             nextUID(),
-		log:            log.WithLabels("owner", opts.name),
-		parent:         cc,
+		transformation:         hf,
+		statefulTransformation: stateful,
+		collectionName:         opts.name,
+		id:                     nextUID(),
+		log:                    log.WithLabels("owner", opts.name),
+		parent:                 cc,
 		dependencyState: dependencyState[I]{
 			collectionDependencies:       sets.New[collectionUID](),
 			collectionDependencyHandlers: map[collectionUID]HandlerRegistration{},
