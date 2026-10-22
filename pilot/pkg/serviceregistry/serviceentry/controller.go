@@ -16,7 +16,6 @@ package serviceentry
 
 import (
 	"strings"
-	"sync"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -56,11 +55,6 @@ type Controller struct {
 
 	clusterID cluster.ID
 	shard     model.ShardKey
-
-	// Serializes the push handlers, so each handler's existence checks and the shard updates based on
-	// them are atomic. Otherwise, endpoints republished for a re-created service between the service
-	// handler's checks and its shard teardown would be deleted.
-	pushMutex sync.Mutex
 
 	domainSuffix string
 
@@ -104,10 +98,10 @@ type Outputs struct {
 	ServicesByHost krt.Index[string, *model.Service]
 	// ServicesByNamespaceHost is an index collection of services keyed by namespace+hostname.
 	// Use cases:
-	// - XDS ConfigUpdates for service updates.
-	// - recognize full service deletions.
+	// - drive the lifetime of merged service endpoints.
 	ServicesByNamespaceHost krt.IndexCollection[string, *model.Service]
 	// ServiceInstancesByNamespaceHost is a collection of instances keyed by namespace and hostname.
+	// An entry exists while any service backs the key, including when it has no endpoints.
 	// Use cases:
 	// - as an input to EDS Updates
 	ServiceInstancesByNamespaceHost krt.Collection[*InstancesByNamespaceHost]
@@ -143,8 +137,7 @@ func (swi *ServiceWithInstances) Equals(other *ServiceWithInstances) bool {
 }
 
 type InstancesByNamespaceHost struct {
-	Namespace string
-	Hostname  string
+	Key       string
 	Endpoints []*model.IstioEndpoint
 	// HasDNSServiceEndpoint is set when an endpoint backs a DNS resolving service. Those are inlined
 	// into the cluster rather than delivered over EDS, so changing them requires a config push.
@@ -152,11 +145,11 @@ type InstancesByNamespaceHost struct {
 }
 
 func (s *InstancesByNamespaceHost) ResourceName() string {
-	return s.Namespace + "/" + s.Hostname
+	return s.Key
 }
 
 func (s *InstancesByNamespaceHost) Equals(other *InstancesByNamespaceHost) bool {
-	if s.Namespace != other.Namespace || s.Hostname != other.Hostname || s.HasDNSServiceEndpoint != other.HasDNSServiceEndpoint {
+	if s.Key != other.Key || s.HasDNSServiceEndpoint != other.HasDNSServiceEndpoint {
 		return false
 	}
 
@@ -194,6 +187,18 @@ func (wsi *WorkloadServiceInstance) EqualsIgnoringService(other *WorkloadService
 	return wsi.UID == other.UID &&
 		wsi.ServicePort.Equals(other.ServicePort) &&
 		wsi.Endpoint.Equals(other.Endpoint)
+}
+
+type ServiceKey struct {
+	Key string
+}
+
+func (s ServiceKey) ResourceName() string {
+	return s.Key
+}
+
+func (s ServiceKey) Equals(other ServiceKey) bool {
+	return s.Key == other.Key
 }
 
 type Option func(*Controller)
@@ -381,15 +386,28 @@ func (s *Controller) buildCollections(sendUnhealthy bool) {
 			return []string{si.Service.Attributes.Namespace + "/" + string(si.Service.Hostname)}
 		}).AsCollection(s.opts.WithName("outputs/InstancesByNamespaceHost")...)
 
-		mergedInstancesByNamespaceHost := krt.NewPointerCollection(
-			instancesByNsHost,
-			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *WorkloadServiceInstance]) *InstancesByNamespaceHost {
-				namespace, hostname, _ := strings.Cut(obj.Key, "/")
-				endpoints, hasDNSServiceEndpoint := mergeServiceInstances(obj.Objects)
+		// Index collections emit synthetic add events for updates. Materialize the keys so changes
+		// to backing services only propagate when a namespace/hostname appears or disappears.
+		serviceKeys := krt.NewCollection(servicesByNamespaceHost,
+			func(ctx krt.HandlerContext, obj krt.IndexObject[string, *model.Service]) *ServiceKey {
+				return &ServiceKey{Key: obj.Key}
+			}, s.opts.WithName("outputs/ServiceKeys")...)
 
+		mergedInstancesByNamespaceHost := krt.NewPointerCollection(
+			serviceKeys,
+			func(ctx krt.HandlerContext, obj ServiceKey) *InstancesByNamespaceHost {
+				instances := instancesByNsHost.FetchOne(ctx, krt.FilterKey(obj.Key))
+				if instances == nil {
+					return &InstancesByNamespaceHost{
+						Key:                   obj.Key,
+						Endpoints:             nil,
+						HasDNSServiceEndpoint: false,
+					}
+				}
+
+				endpoints, hasDNSServiceEndpoint := mergeServiceInstances(instances.Objects)
 				return &InstancesByNamespaceHost{
-					Namespace:             namespace,
-					Hostname:              hostname,
+					Key:                   obj.Key,
 					Endpoints:             endpoints,
 					HasDNSServiceEndpoint: hasDNSServiceEndpoint,
 				}
@@ -411,32 +429,25 @@ func (s *Controller) buildCollections(sendUnhealthy bool) {
 }
 
 func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByNamespaceHost]) {
-	s.pushMutex.Lock()
-	defer s.pushMutex.Unlock()
-
 	dnsServicesUpdated := sets.New[model.ConfigKey]()
 	for _, e := range events {
 		obj := e.Latest()
-		key := obj.ResourceName()
-		// This handler operates independently from the service handler, so the service may already be
-		// gone by the time we get here.
-		serviceExists := s.outputs.ServicesByNamespaceHost.GetKey(key) != nil
-
-		if e.Event == controllers.EventDelete {
-			if !serviceExists {
-				// The service handler leaves the teardown to us while it still sees endpoints. If it already
-				// did it, this is a no-op.
-				s.XdsUpdater.SvcUpdate(s.shard, obj.Hostname, obj.Namespace, model.EventDelete)
-				continue
-			}
-			s.XdsUpdater.EDSReplace(s.shard, obj.Hostname, obj.Namespace, nil)
-		} else {
-			s.XdsUpdater.EDSReplace(s.shard, obj.Hostname, obj.Namespace, obj.Endpoints)
-		}
-		if !serviceExists {
-			// The service handler pushes for the deleted service.
+		namespace, hostname, _ := strings.Cut(obj.Key, "/")
+		switch {
+		case e.Event == controllers.EventDelete:
+			// A merged entry is deleted only when its last backing service is gone.
+			s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.EventDelete)
+			continue
+		case s.outputs.ServicesByNamespaceHost.GetKey(obj.Key) == nil:
+			// Instance changes can arrive before the service key's deletion. The service
+			// handler requests the config push; skip endpoint pushes for a service already gone.
+			continue
+		case e.Event == controllers.EventAdd && len(obj.Endpoints) == 0:
+			// A service may appear before its instances are ready. There are no endpoints to
+			// clear on an initial add; subsequent updates still publish an empty endpoint set.
 			continue
 		}
+		s.XdsUpdater.EDSReplace(s.shard, hostname, namespace, obj.Endpoints)
 
 		// DNS endpoints are inlined into the cluster, so gaining, changing or losing them has to regenerate it.
 		needsFullPush := obj.HasDNSServiceEndpoint
@@ -444,7 +455,7 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByN
 			needsFullPush = obj.HasDNSServiceEndpoint || (*e.Old).HasDNSServiceEndpoint
 		}
 		if needsFullPush {
-			dnsServicesUpdated.Insert(model.ConfigKey{Kind: kind.ServiceEntry, Name: obj.Hostname, Namespace: obj.Namespace})
+			dnsServicesUpdated.Insert(model.ConfigKey{Kind: kind.ServiceEntry, Name: hostname, Namespace: namespace})
 		}
 	}
 	if len(dnsServicesUpdated) > 0 {
@@ -456,9 +467,6 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByN
 }
 
 func (s *Controller) pushServiceUpdates(events []krt.Event[*model.Service]) {
-	s.pushMutex.Lock()
-	defer s.pushMutex.Unlock()
-
 	configsUpdated := sets.New[model.ConfigKey]()
 	for _, e := range events {
 		svc := e.Latest()
@@ -471,21 +479,7 @@ func (s *Controller) pushServiceUpdates(events []krt.Event[*model.Service]) {
 		})
 		if e.Event != controllers.EventDelete {
 			s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.Event(e.Event))
-			continue
 		}
-		key := namespace + "/" + hostname
-		// Several ServiceEntries can back the same hostname, so only tear down the host's endpoint shards
-		// once the last of those services is gone.
-		if s.outputs.ServicesByNamespaceHost.GetKey(key) != nil {
-			continue
-		}
-		// The endpoints are processed by a separate handler. If it still has them, let it tear the shards
-		// down when it handles their deletion: a quick re-create may be coalesced with this deletion, in
-		// which case it never sees one and the endpoints must survive.
-		if s.outputs.ServiceInstancesByNamespaceHost.GetKey(key) != nil {
-			continue
-		}
-		s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.EventDelete)
 	}
 	if len(configsUpdated) > 0 {
 		s.XdsUpdater.ConfigUpdate(&model.PushRequest{

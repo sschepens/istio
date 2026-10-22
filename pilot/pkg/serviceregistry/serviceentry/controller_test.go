@@ -41,6 +41,7 @@ import (
 	"istio.io/istio/pkg/config/schema/collections"
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube"
+	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
 	"istio.io/istio/pkg/maps"
@@ -97,8 +98,7 @@ func makeWorkloadEntryInstanceWithServiceAccount(cfg *config.Config, workloadNam
 }
 
 // shardDeleteUpdater is an xdsfake.Updater that, like the DiscoveryServer, treats a service deletion that finds no
-// endpoint shards to delete as a no-op, and reports no event for it. Both the service and the endpoint handler may
-// tear down the shards of a deleted service, so tests would otherwise see a deletion once or twice depending on timing.
+// endpoint shards to delete as a no-op, and reports no event for it.
 type shardDeleteUpdater struct {
 	*xdsfake.Updater
 	index *model.EndpointIndex
@@ -240,6 +240,112 @@ func TestWorkloadEntryHealthEvents(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestServiceEndpointDeletionHandlers(t *testing.T) {
+	const namespace, hostname = "namespace", "example.com"
+	obj := &InstancesByNamespaceHost{Key: namespace + "/" + hostname}
+	t.Run("endpoint handler deletes the service shard", func(t *testing.T) {
+		fx := xdsfake.NewFakeXDS()
+		// No output collections are set: deletion must rely only on the event.
+		sd := &Controller{XdsUpdater: fx}
+		sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{{
+			Event: controllers.EventDelete,
+			Old:   &obj,
+		}})
+		expectEvents(t, fx, Event{Type: "service", ID: hostname, Namespace: namespace})
+		fx.AssertEmpty(t, 0)
+	})
+	t.Run("service handler only requests a config push", func(t *testing.T) {
+		fx := xdsfake.NewFakeXDS()
+		sd := &Controller{XdsUpdater: fx}
+		svc := &model.Service{Hostname: host.Name(hostname), Attributes: model.ServiceAttributes{Namespace: namespace}}
+		sd.pushServiceUpdates([]krt.Event[*model.Service]{{
+			Event: controllers.EventDelete,
+			Old:   &svc,
+		}})
+		expectEvents(t, fx, Event{Type: "xds", ID: hostname})
+		fx.AssertEmpty(t, 0)
+	})
+}
+
+func TestServiceEndpointUpdatesRequireService(t *testing.T) {
+	const namespace, hostname = "namespace", "example.com"
+	for _, exists := range []bool{false, true} {
+		for _, event := range []controllers.EventType{controllers.EventAdd, controllers.EventUpdate} {
+			t.Run(fmt.Sprintf("exists=%v/event=%v", exists, event), func(t *testing.T) {
+				fx := xdsfake.NewFakeXDS()
+				obj := &InstancesByNamespaceHost{
+					Key:                   namespace + "/" + hostname,
+					Endpoints:             []*model.IstioEndpoint{{Addresses: []string{"1.2.3.4"}}},
+					HasDNSServiceEndpoint: true,
+				}
+				// A service for the same hostname in another namespace must not permit the push.
+				serviceNamespace := "other"
+				if exists {
+					serviceNamespace = namespace
+				}
+				services := krt.NewStaticCollection[*model.Service](nil, []*model.Service{{
+					Hostname: host.Name(hostname), Attributes: model.ServiceAttributes{Namespace: serviceNamespace},
+				}})
+				sd := &Controller{XdsUpdater: fx, outputs: Outputs{
+					ServicesByNamespaceHost: krt.NewIndex(services, "namespaceHost", func(svc *model.Service) []string {
+						return []string{svc.Attributes.Namespace + "/" + string(svc.Hostname)}
+					}).AsCollection(),
+				}}
+				ev := krt.Event[*InstancesByNamespaceHost]{Event: event, New: &obj}
+				if event == controllers.EventUpdate {
+					ev.Old = &obj
+				}
+				sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{ev})
+				if exists {
+					expectEvents(t, fx,
+						Event{Type: "eds", ID: hostname, Namespace: namespace, EndpointCount: 1},
+						Event{Type: "xds", ID: hostname})
+				}
+				fx.AssertEmpty(t, 0)
+			})
+		}
+	}
+}
+
+func TestServiceEndpointLifetimeWithoutEndpoints(t *testing.T) {
+	store, sd, fx := initServiceDiscovery(t)
+	se := httpStatic.DeepCopy()
+	se.Spec.(*networking.ServiceEntry).Endpoints = nil
+	overlay := se.DeepCopy()
+	overlay.Name += "-overlay"
+	hostname := se.Spec.(*networking.ServiceEntry).Hosts[0]
+	key := se.Namespace + "/" + hostname
+	deleted := assert.NewTracker[string](t)
+	sd.outputs.ServiceInstancesByNamespaceHost.RegisterBatch(func(events []krt.Event[*InstancesByNamespaceHost]) {
+		for _, e := range events {
+			if e.Event == controllers.EventDelete {
+				deleted.Record(e.Latest().ResourceName())
+			}
+		}
+	}, false)
+
+	createConfigs([]*config.Config{&se}, store, t)
+	expectEvents(t, fx, Event{Type: "service", ID: hostname}, Event{Type: "xds", ID: hostname})
+	assert.EventuallyEqual(t, func() *InstancesByNamespaceHost {
+		return ptr.OrEmpty(sd.outputs.ServiceInstancesByNamespaceHost.GetKey(key))
+	}, &InstancesByNamespaceHost{Key: key})
+
+	createConfigs([]*config.Config{&overlay}, store, t)
+	expectEvents(t, fx, Event{Type: "service", ID: hostname}, Event{Type: "xds", ID: hostname})
+	deleteConfigs([]*config.Config{&se}, store, t)
+	expectEvents(t, fx, Event{Type: "xds", ID: hostname})
+	assert.EventuallyEqual(t, func() int {
+		return len(ptr.OrEmpty(sd.outputs.ServicesByNamespaceHost.GetKey(key)).Objects)
+	}, 1)
+	assert.Equal(t, sd.outputs.ServiceInstancesByNamespaceHost.GetKey(key) != nil, true)
+	deleted.Empty()
+
+	deleteConfigs([]*config.Config{&overlay}, store, t)
+	expectEvents(t, fx, Event{Type: "xds", ID: hostname})
+	deleted.WaitOrdered(key)
+	assert.Equal(t, sd.outputs.ServiceInstancesByNamespaceHost.GetKey(key), nil)
 }
 
 func TestServiceDiscoveryServices(t *testing.T) {
