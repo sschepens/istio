@@ -151,16 +151,16 @@ type InstancesByNamespaceHost struct {
 	HasDNSServiceEndpoint bool
 }
 
-func (e *InstancesByNamespaceHost) ResourceName() string {
-	return e.Namespace + "/" + e.Hostname
+func (s *InstancesByNamespaceHost) ResourceName() string {
+	return s.Namespace + "/" + s.Hostname
 }
 
-func (e *InstancesByNamespaceHost) Equals(other *InstancesByNamespaceHost) bool {
-	if e.Namespace != other.Namespace || e.Hostname != other.Hostname || e.HasDNSServiceEndpoint != other.HasDNSServiceEndpoint {
+func (s *InstancesByNamespaceHost) Equals(other *InstancesByNamespaceHost) bool {
+	if s.Namespace != other.Namespace || s.Hostname != other.Hostname || s.HasDNSServiceEndpoint != other.HasDNSServiceEndpoint {
 		return false
 	}
 
-	return slices.EqualFunc(e.Endpoints, other.Endpoints, func(a, b *model.IstioEndpoint) bool {
+	return slices.EqualFunc(s.Endpoints, other.Endpoints, func(a, b *model.IstioEndpoint) bool {
 		return a.Equals(b)
 	})
 }
@@ -178,15 +178,11 @@ func (wsi *WorkloadServiceInstance) ResourceName() string {
 	return wsi.UID
 }
 
+// Equals checks equality of the WorkloadServiceInstance.
+// Equality is determined by the UID, ServicePort, Endpoint, and Service. Namespace and Name
+// are already included in the UID.
 func (wsi *WorkloadServiceInstance) Equals(other *WorkloadServiceInstance) bool {
-	if wsi == other {
-		return true
-	}
-	// Equality is determined by the UID, ServicePort, Endpoint, and Service. Namespace and Name
-	// are already included in the UID.
-	return wsi.UID == other.UID &&
-		wsi.ServicePort.Equals(other.ServicePort) &&
-		wsi.Endpoint.Equals(other.Endpoint) &&
+	return wsi.EqualsIgnoringService(other) &&
 		wsi.Service.Equals(other.Service)
 }
 
