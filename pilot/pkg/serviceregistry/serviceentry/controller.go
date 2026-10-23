@@ -384,7 +384,7 @@ func (s *Controller) buildCollections(sendUnhealthy bool) {
 
 		instancesByNsHost := krt.NewIndex(allInstances, "namespaceHost", func(si *WorkloadServiceInstance) []string {
 			return []string{si.Service.Attributes.Namespace + "/" + string(si.Service.Hostname)}
-		}).AsCollection(s.opts.WithName("outputs/InstancesByNamespaceHost")...)
+		})
 
 		// Index collections emit synthetic add events for updates. Materialize the keys so changes
 		// to backing services only propagate when a namespace/hostname appears or disappears.
@@ -396,8 +396,8 @@ func (s *Controller) buildCollections(sendUnhealthy bool) {
 		mergedInstancesByNamespaceHost := krt.NewPointerCollection(
 			serviceKeys,
 			func(ctx krt.HandlerContext, obj ServiceKey) *InstancesByNamespaceHost {
-				instances := instancesByNsHost.FetchOne(ctx, krt.FilterKey(obj.Key))
-				if instances == nil {
+				instances := instancesByNsHost.Fetch(ctx, obj.Key)
+				if len(instances) == 0 {
 					return &InstancesByNamespaceHost{
 						Key:                   obj.Key,
 						Endpoints:             nil,
@@ -405,7 +405,7 @@ func (s *Controller) buildCollections(sendUnhealthy bool) {
 					}
 				}
 
-				endpoints, hasDNSServiceEndpoint := mergeServiceInstances(instances.Objects)
+				endpoints, hasDNSServiceEndpoint := mergeServiceInstances(instances)
 				return &InstancesByNamespaceHost{
 					Key:                   obj.Key,
 					Endpoints:             endpoints,

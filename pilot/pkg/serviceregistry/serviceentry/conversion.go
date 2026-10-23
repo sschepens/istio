@@ -383,7 +383,7 @@ func convertServiceEntryToInstances(
 				Name:      cfg.Name + "-" + strconv.Itoa(i),
 			}
 			wli := convertWorkloadEntryToWorkloadInstance(ctx, endpoint, meta, meshConfig, cfg.Namespace, clusterID, networkIDFn)
-			out = append(out, convertWorkloadInstanceToInstances(wli, service)...)
+			out = appendWorkloadInstanceToInstances(out, wli, service)
 		}
 	}
 	return out
@@ -405,6 +405,15 @@ func getTLSModeFromWorkloadEntry(wle *networking.WorkloadEntry) string {
 // The workload instance has no service or service-port association, so create one instance per service port.
 func convertWorkloadInstanceToInstances(workloadInstance *model.WorkloadInstance, service *model.Service) []*WorkloadServiceInstance {
 	out := make([]*WorkloadServiceInstance, 0, len(service.Ports))
+	return appendWorkloadInstanceToInstances(out, workloadInstance, service)
+}
+
+// appendWorkloadInstanceToInstances appends one instance per service port to out.
+func appendWorkloadInstanceToInstances(
+	out []*WorkloadServiceInstance,
+	workloadInstance *model.WorkloadInstance,
+	service *model.Service,
+) []*WorkloadServiceInstance {
 	// unix addresses can only happen on workload entries which have only one address
 	addrs := workloadInstance.Endpoint.Addresses
 	unixAddress := len(addrs) == 1 && strings.HasPrefix(addrs[0], model.UnixAddressPrefix)
@@ -616,7 +625,7 @@ func serviceInstances(
 		}
 		res := make([]*WorkloadServiceInstance, 0, n)
 		for _, s := range selectedServices {
-			res = append(res, convertWorkloadInstanceToInstances(wi, s)...)
+			res = appendWorkloadInstanceToInstances(res, wi, s)
 		}
 		return res
 	}, opts.WithName("outputs/WorkloadServiceInstances")...)

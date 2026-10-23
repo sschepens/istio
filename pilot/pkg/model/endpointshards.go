@@ -218,8 +218,6 @@ func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) 
 	return ep, true
 }
 
-// DeleteServiceShard deletes the endpoints of a service in a shard. Unless preserveKeys is set, the
-// service is also removed from the index once no shard has endpoints for it.
 func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
