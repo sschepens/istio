@@ -296,7 +296,7 @@ func newController(
 		s.handlers = append(
 			s.handlers,
 			s.outputs.ServiceInstancesByNamespaceHost.RegisterBatch(s.pushServiceEndpointUpdates, false),
-			s.outputs.Services.RegisterBatch(s.pushServiceUpdates, false),
+			s.outputs.ServicesByNamespaceHost.RegisterBatch(s.pushServiceUpdates, false),
 			s.outputs.ServiceInstances.RegisterBatch(s.pushProxyUpdates, false),
 		)
 	}
@@ -430,6 +430,7 @@ func (s *Controller) buildCollections(sendUnhealthy bool) {
 
 func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByNamespaceHost]) {
 	dnsServicesUpdated := sets.New[model.ConfigKey]()
+	deletedServices := sets.New[model.ConfigKey]()
 	for _, e := range events {
 		obj := e.Latest()
 		namespace, hostname, _ := strings.Cut(obj.Key, "/")
@@ -437,10 +438,7 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByN
 		case e.Event == controllers.EventDelete:
 			// A merged entry is deleted only when its last backing service is gone.
 			s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.EventDelete)
-			continue
-		case s.outputs.ServicesByNamespaceHost.GetKey(obj.Key) == nil:
-			// Instance changes can arrive before the service key's deletion. The service
-			// handler requests the config push; skip endpoint pushes for a service already gone.
+			deletedServices.Insert(model.ConfigKey{Kind: kind.ServiceEntry, Name: hostname, Namespace: namespace})
 			continue
 		case e.Event == controllers.EventAdd && len(obj.Endpoints) == 0:
 			// A service may appear before its instances are ready. There are no endpoints to
@@ -464,22 +462,31 @@ func (s *Controller) pushServiceEndpointUpdates(events []krt.Event[*InstancesByN
 			Reason:         model.NewReasonStats(model.EndpointUpdate),
 		})
 	}
+	if len(deletedServices) > 0 {
+		s.XdsUpdater.ConfigUpdate(&model.PushRequest{
+			ConfigsUpdated: deletedServices,
+			Reason:         model.NewReasonStats(model.ServiceUpdate),
+		})
+	}
 }
 
-func (s *Controller) pushServiceUpdates(events []krt.Event[*model.Service]) {
+func (s *Controller) pushServiceUpdates(events []krt.Event[krt.IndexObject[string, *model.Service]]) {
 	configsUpdated := sets.New[model.ConfigKey]()
 	for _, e := range events {
-		svc := e.Latest()
-		hostname, namespace := string(svc.Hostname), svc.Attributes.Namespace
+		// full service deletions are handled in the pushServiceEndpointUpdates handler
+		if e.Event == controllers.EventDelete {
+			continue
+		}
+
+		obj := e.Latest()
+		namespace, hostname, _ := strings.Cut(obj.Key, "/")
 
 		configsUpdated.Insert(model.ConfigKey{
 			Kind:      kind.ServiceEntry,
 			Name:      hostname,
 			Namespace: namespace,
 		})
-		if e.Event != controllers.EventDelete {
-			s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.Event(e.Event))
-		}
+		s.XdsUpdater.SvcUpdate(s.shard, hostname, namespace, model.Event(e.Event))
 	}
 	if len(configsUpdated) > 0 {
 		s.XdsUpdater.ConfigUpdate(&model.PushRequest{

@@ -245,31 +245,74 @@ func TestWorkloadEntryHealthEvents(t *testing.T) {
 func TestServiceEndpointDeletionHandlers(t *testing.T) {
 	const namespace, hostname = "namespace", "example.com"
 	obj := &InstancesByNamespaceHost{Key: namespace + "/" + hostname}
-	t.Run("endpoint handler deletes the service shard", func(t *testing.T) {
+	for _, publishEmpty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("endpoint handler deletion/publishEmpty=%v", publishEmpty), func(t *testing.T) {
+			fx := xdsfake.NewFakeXDS()
+			// No output collections are set: publication and deletion must rely only on the event.
+			sd := &Controller{XdsUpdater: fx}
+			if publishEmpty {
+				old := &InstancesByNamespaceHost{Key: obj.Key, Endpoints: []*model.IstioEndpoint{{Addresses: []string{"1.2.3.4"}}}}
+				sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{{
+					Event: controllers.EventUpdate, Old: &old, New: &obj,
+				}})
+				assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{Type: "eds", ID: hostname, Namespace: namespace})
+			}
+			sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{{
+				Event: controllers.EventDelete,
+				Old:   &obj,
+			}})
+			assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{Type: "service", ID: hostname, Namespace: namespace})
+			assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{Type: "xds", ID: hostname, Reason: model.NewReasonStats(model.ServiceUpdate)})
+			fx.AssertEmpty(t, 0)
+		})
+	}
+	t.Run("service handler ignores deleted index buckets", func(t *testing.T) {
 		fx := xdsfake.NewFakeXDS()
-		// No output collections are set: deletion must rely only on the event.
 		sd := &Controller{XdsUpdater: fx}
-		sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{{
+		bucket := krt.IndexObject[string, *model.Service]{Key: namespace + "/" + hostname}
+		sd.pushServiceUpdates([]krt.Event[krt.IndexObject[string, *model.Service]]{{
 			Event: controllers.EventDelete,
-			Old:   &obj,
+			Old:   &bucket,
 		}})
-		expectEvents(t, fx, Event{Type: "service", ID: hostname, Namespace: namespace})
-		fx.AssertEmpty(t, 0)
-	})
-	t.Run("service handler only requests a config push", func(t *testing.T) {
-		fx := xdsfake.NewFakeXDS()
-		sd := &Controller{XdsUpdater: fx}
-		svc := &model.Service{Hostname: host.Name(hostname), Attributes: model.ServiceAttributes{Namespace: namespace}}
-		sd.pushServiceUpdates([]krt.Event[*model.Service]{{
-			Event: controllers.EventDelete,
-			Old:   &svc,
-		}})
-		expectEvents(t, fx, Event{Type: "xds", ID: hostname})
 		fx.AssertEmpty(t, 0)
 	})
 }
 
-func TestServiceEndpointUpdatesRequireService(t *testing.T) {
+func TestServiceEndpointUpdatesSeparatePushReasons(t *testing.T) {
+	const namespace = "namespace"
+	fx := xdsfake.NewFakeXDS()
+	services := krt.NewStaticCollection[*model.Service](nil, []*model.Service{{
+		Hostname: "dns.example.com", Attributes: model.ServiceAttributes{Namespace: namespace},
+	}})
+	sd := &Controller{XdsUpdater: fx, outputs: Outputs{
+		ServicesByNamespaceHost: krt.NewIndex(services, "namespaceHost", func(svc *model.Service) []string {
+			return []string{svc.Attributes.Namespace + "/" + string(svc.Hostname)}
+		}).AsCollection(),
+	}}
+	deleted := &InstancesByNamespaceHost{Key: namespace + "/deleted.example.com"}
+	oldDNS := &InstancesByNamespaceHost{Key: namespace + "/dns.example.com", HasDNSServiceEndpoint: true}
+	dns := &InstancesByNamespaceHost{
+		Key:                   oldDNS.Key,
+		Endpoints:             []*model.IstioEndpoint{{Addresses: []string{"1.2.3.4"}}},
+		HasDNSServiceEndpoint: true,
+	}
+	sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{
+		{Event: controllers.EventDelete, Old: &deleted},
+		{Event: controllers.EventUpdate, Old: &oldDNS, New: &dns},
+	})
+	// Both endpoint mutations precede the config pushes, which retain their distinct reasons and hosts.
+	assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{Type: "service", ID: "deleted.example.com", Namespace: namespace})
+	assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{Type: "eds", ID: "dns.example.com", Namespace: namespace, Endpoints: dns.Endpoints})
+	assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{
+		Type: "xds", ID: "dns.example.com", Reason: model.NewReasonStats(model.EndpointUpdate),
+	})
+	assert.Equal(t, assert.ChannelHasItem(t, fx.Events), Event{
+		Type: "xds", ID: "deleted.example.com", Reason: model.NewReasonStats(model.ServiceUpdate),
+	})
+	fx.AssertEmpty(t, 0)
+}
+
+func TestServiceEndpointUpdatesIndependentOfServiceExistence(t *testing.T) {
 	const namespace, hostname = "namespace", "example.com"
 	for _, exists := range []bool{false, true} {
 		for _, event := range []controllers.EventType{controllers.EventAdd, controllers.EventUpdate} {
@@ -280,7 +323,8 @@ func TestServiceEndpointUpdatesRequireService(t *testing.T) {
 					Endpoints:             []*model.IstioEndpoint{{Addresses: []string{"1.2.3.4"}}},
 					HasDNSServiceEndpoint: true,
 				}
-				// A service for the same hostname in another namespace must not permit the push.
+				// Endpoint events must be published even if the service index has already
+				// removed the service; a delete/recreate may coalesce without another endpoint event.
 				serviceNamespace := "other"
 				if exists {
 					serviceNamespace = namespace
@@ -298,11 +342,9 @@ func TestServiceEndpointUpdatesRequireService(t *testing.T) {
 					ev.Old = &obj
 				}
 				sd.pushServiceEndpointUpdates([]krt.Event[*InstancesByNamespaceHost]{ev})
-				if exists {
-					expectEvents(t, fx,
-						Event{Type: "eds", ID: hostname, Namespace: namespace, EndpointCount: 1},
-						Event{Type: "xds", ID: hostname})
-				}
+				expectEvents(t, fx,
+					Event{Type: "eds", ID: hostname, Namespace: namespace, EndpointCount: 1},
+					Event{Type: "xds", ID: hostname})
 				fx.AssertEmpty(t, 0)
 			})
 		}
@@ -315,6 +357,8 @@ func TestServiceEndpointLifetimeWithoutEndpoints(t *testing.T) {
 	se.Spec.(*networking.ServiceEntry).Endpoints = nil
 	overlay := se.DeepCopy()
 	overlay.Name += "-overlay"
+	// Removing se must push the loss of its first port even though overlay keeps the host alive.
+	overlay.Spec.(*networking.ServiceEntry).Ports = overlay.Spec.(*networking.ServiceEntry).Ports[1:]
 	hostname := se.Spec.(*networking.ServiceEntry).Hosts[0]
 	key := se.Namespace + "/" + hostname
 	deleted := assert.NewTracker[string](t)
@@ -335,7 +379,7 @@ func TestServiceEndpointLifetimeWithoutEndpoints(t *testing.T) {
 	createConfigs([]*config.Config{&overlay}, store, t)
 	expectEvents(t, fx, Event{Type: "service", ID: hostname}, Event{Type: "xds", ID: hostname})
 	deleteConfigs([]*config.Config{&se}, store, t)
-	expectEvents(t, fx, Event{Type: "xds", ID: hostname})
+	expectEvents(t, fx, Event{Type: "service", ID: hostname}, Event{Type: "xds", ID: hostname})
 	assert.EventuallyEqual(t, func() int {
 		return len(ptr.OrEmpty(sd.outputs.ServicesByNamespaceHost.GetKey(key)).Objects)
 	}, 1)
@@ -617,10 +661,10 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 			makeInstance(httpStaticOverlayUpdatedNs, "httpStaticOverlay-1", []string{"7.7.7.7"}, 4567, httpStaticOverlayUpdatedNs.Spec.(*networking.ServiceEntry).Ports[0], map[string]string{"namespace": "bar"}, PlainText),
 		}
 		expectServiceInstances(t, sd, httpStaticOverlayUpdatedNs, 0, instances)
-		// svcUpdate is not triggered since `httpStatic` is there and has instances, so we should
-		// not delete the endpoints shards of "*.google.com". We xpect a full push as the service has changed.
+		// The surviving index bucket emits a service update and a full push, without deleting its shard.
 		expectEvents(
 			t, events,
+			Event{Type: "service", ID: "*.google.com", Namespace: httpStaticOverlayUpdated.Namespace},
 			Event{Type: "eds", ID: "*.google.com", Namespace: httpStaticOverlayUpdated.Namespace},
 			Event{Type: "xds", ID: "*.google.com"},
 		)
@@ -629,12 +673,23 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 		deleteConfigs([]*config.Config{httpStatic}, store, t)
 		// svcUpdate is triggered since "*.google.com" in same namespace is deleted and
 		// we need to delete endpoint shards. We expect a full push as the service has changed.
-		// The endpoint deletion is not pushed separately, as the service deletion already covers it.
-		expectEvents(
-			t, events,
+		// The endpoint handler requests the push after removing the shard.
+		expectServiceDeletionEvents(
+			t, events, "*.google.com", httpStatic.Namespace,
 			Event{Type: "service", ID: "*.google.com", Namespace: httpStatic.Namespace},
 			Event{Type: "xds", ID: "*.google.com"},
 		)
+
+		// The service-index handler skips deletes without emitting a notification. Wait for a
+		// later service event on that handler so it has processed the deletion before we recreate.
+		marker := httpStatic.DeepCopy()
+		marker.Name = "service-handler-marker"
+		marker.Spec.(*networking.ServiceEntry).Hosts = []string{"service-handler-marker.example.com"}
+		marker.Spec.(*networking.ServiceEntry).Endpoints = nil
+		createConfigs([]*config.Config{&marker}, store, t)
+		expectEvents(t, events,
+			Event{Type: "service", ID: "service-handler-marker.example.com", Namespace: marker.Namespace},
+			Event{Type: "xds", ID: "service-handler-marker.example.com"})
 
 		// add back httpStatic
 		createConfigs([]*config.Config{httpStatic}, store, t)
@@ -728,8 +783,8 @@ func TestServiceDiscoveryServiceUpdate(t *testing.T) {
 
 		// restore this config and remove the added host.
 		createConfigs([]*config.Config{httpStaticOverlayUpdated}, store, t)
-		expectEvents(
-			t, events,
+		expectServiceDeletionEvents(
+			t, events, "other.com", httpStatic.Namespace,
 			Event{Type: "service", ID: "other.com", Namespace: httpStatic.Namespace},
 			Event{Type: "xds", ID: "other.com"},
 		) // service deleted
@@ -1202,12 +1257,13 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		expectProxyInstances(t, sd, instances, []string{"2.2.2.2"})
 		expectServiceInstances(t, sd, selector, 0, []*WorkloadServiceInstance{})
 		expectServiceInstances(t, sd, updated, 0, instances)
-		expectEvents(
-			t, events,
+		expectServiceDeletionEvents(
+			t, events, "selector.com", selector.Namespace,
 			Event{Type: "service", ID: "updated.com", Namespace: selector.Namespace},
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "eds", ID: "updated.com", Namespace: selector.Namespace},
-			Event{Type: "xds", ID: "selector.com,updated.com"},
+			Event{Type: "xds", ID: "updated.com"},
+			Event{Type: "xds", ID: "selector.com"},
 			// the workload is now an endpoint of updated.com instead of selector.com
 			Event{Type: "proxy", ID: "2.2.2.2"},
 		)
@@ -1233,12 +1289,13 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 		expectProxyInstances(t, sd, instances, []string{"2.2.2.2"})
 		expectServiceInstances(t, sd, selector, 0, instances)
 		expectServiceInstances(t, sd, updated, 0, []*WorkloadServiceInstance{})
-		expectEvents(
-			t, events,
+		expectServiceDeletionEvents(
+			t, events, "updated.com", selector.Namespace,
 			Event{Type: "service", ID: "selector.com", Namespace: selector.Namespace},
 			Event{Type: "service", ID: "updated.com", Namespace: selector.Namespace},
 			Event{Type: "eds", ID: "selector.com", Namespace: selector.Namespace},
-			Event{Type: "xds", ID: "selector.com,updated.com"},
+			Event{Type: "xds", ID: "selector.com"},
+			Event{Type: "xds", ID: "updated.com"},
 			Event{Type: "proxy", ID: "2.2.2.2"},
 		)
 	})
@@ -1392,8 +1449,8 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 			Event{Type: "eds", ID: "selector.com"},
 		)
 		deleteConfigs([]*config.Config{selector}, store, t)
-		expectEvents(
-			t, events,
+		expectServiceDeletionEvents(
+			t, events, "selector.com", selector.Namespace,
 			Event{Type: "service", ID: "selector.com"},
 			Event{Type: "xds", ID: "selector.com"},
 		)
@@ -1405,8 +1462,8 @@ func TestServiceDiscoveryWorkloadUpdate(t *testing.T) {
 			Event{Type: "xds", ID: "dns.selector.com"},
 		)
 		deleteConfigs([]*config.Config{dnsSelector}, store, t)
-		expectEvents(
-			t, events,
+		expectServiceDeletionEvents(
+			t, events, "dns.selector.com", dnsSelector.Namespace,
 			Event{Type: "service", ID: "dns.selector.com"},
 			Event{Type: "xds", ID: "dns.selector.com"},
 		)
@@ -2414,6 +2471,37 @@ func expectProxyTargets(t testing.TB, sd *Controller, expected []model.ServiceTa
 func expectEvents(t testing.TB, ch *xdsfake.Updater, events ...Event) {
 	t.Helper()
 	ch.StrictMatchOrFail(t, events...)
+}
+
+// Removing the instances may publish an empty endpoint set before the service key is deleted.
+// Allow that optional EDS event, but still require all deletion notifications and config pushes.
+func expectServiceDeletionEvents(t testing.TB, ch *xdsfake.Updater, hostname, namespace string, events ...Event) {
+	t.Helper()
+	allowEDS := true
+	for len(events) > 0 {
+		e := assert.ChannelHasItem(t, ch.Events)
+		if allowEDS && e.Type == "eds" && e.ID == hostname && e.Namespace == namespace && len(e.Endpoints) == 0 {
+			allowEDS = false
+			continue
+		}
+		if e.Type == "service" && e.ID == hostname && e.Namespace == namespace {
+			allowEDS = false
+		}
+		matched := false
+		for i, want := range events {
+			if e.Type == want.Type &&
+				(want.ID == "" || e.ID == want.ID) &&
+				(want.Namespace == "" || e.Namespace == want.Namespace) &&
+				(want.EndpointCount == 0 || len(e.Endpoints) == want.EndpointCount) {
+				events = slices.Delete(events, i)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("unexpected event %+v; waiting for %+v", e, events)
+		}
+	}
 }
 
 func expectServiceInstances(t testing.TB, sd *Controller, cfg *config.Config, port int, expected ...[]*WorkloadServiceInstance) {
