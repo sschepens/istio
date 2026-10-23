@@ -729,9 +729,15 @@ func makeInstance(cfg *config.Config, workloadName string, addresses []string, p
 		TargetPort: intstr.FromInt32(int32(svcPort.TargetPort)),
 		Protocol:   protocol.Parse(svcPort.Protocol),
 	}
+	var workloadKey string
+	se := cfg.Spec.(*networking.ServiceEntry)
+	if len(se.Endpoints) != 0 || se.WorkloadSelector != nil || !isDNSTypeService(svc) {
+		workloadKey = (&model.WorkloadInstance{Kind: model.WorkloadEntryKind, Namespace: cfg.Namespace, Name: workloadName}).ResourceName()
+	}
 	return &WorkloadServiceInstance{
+		WorkloadKey: workloadKey,
 		UID: workloadServiceInstanceUID(
-			workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), cfg.Namespace, workloadName, svc),
+			workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), "", cfg.Namespace, workloadName, svc),
 			servicePort,
 		),
 		Namespace: cfg.Namespace,
@@ -1153,6 +1159,12 @@ func TestConvertWorkloadEntryToServiceInstances(t *testing.T) {
 
 			if tt.wle.Locality != "" || tt.clusterID != "" || tt.wle.Network != "" {
 				for _, serviceInstance := range tt.out {
+					serviceInstance.WorkloadKey = (&model.WorkloadInstance{
+						Kind: model.WorkloadEntryKind, Cluster: tt.clusterID, Namespace: meta.Namespace, Name: meta.Name,
+					}).ResourceName()
+					serviceInstance.UID = workloadServiceInstanceUID(
+						workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), tt.clusterID, meta.Namespace, meta.Name, serviceInstance.Service),
+						serviceInstance.ServicePort)
 					serviceInstance.Endpoint.Locality = model.Locality{
 						Label:     tt.wle.Locality,
 						ClusterID: tt.clusterID,

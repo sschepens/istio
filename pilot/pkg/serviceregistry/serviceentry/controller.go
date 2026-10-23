@@ -59,7 +59,7 @@ type FeatureFlags struct {
 	EnableServiceEntrySelectPods bool
 	// EnableAlphaGatewayAPI makes XBackend an additional source of ServiceEntries.
 	EnableAlphaGatewayAPI bool
-	// WorkloadEntryHealthChecks drops WorkloadEntries whose health condition says they are unhealthy.
+	// WorkloadEntryHealthChecks honors workload health, dropping unhealthy entries unless SendUnhealthyEndpoints is enabled.
 	WorkloadEntryHealthChecks bool
 	// EnableDualStack reports every IP of a dual stack Pod instead of only the first.
 	EnableDualStack bool
@@ -196,6 +196,8 @@ func (s *InstancesByNamespaceHost) Equals(other *InstancesByNamespaceHost) bool 
 }
 
 type WorkloadServiceInstance struct {
+	// WorkloadKey identifies the source workload across kinds and clusters.
+	WorkloadKey string
 	UID         string
 	Namespace   string
 	Name        string
@@ -597,10 +599,7 @@ func (s *Controller) pushProxyUpdates(events []krt.Event[*WorkloadServiceInstanc
 			push(oldKey)
 			push(newKey)
 		case controllers.EventDelete:
-			// Instance UIDs start with the workload kind, namespace, and name.
-			kind, _, _ := strings.Cut(si.UID, "/")
-			namespacedName := si.Namespace + "/" + si.Name
-			if s.outputs.AllWorkloads.GetKey(kind+"/"+namespacedName) == nil {
+			if s.outputs.AllWorkloads.GetKey(si.WorkloadKey) == nil {
 				// this workload no longer exists, we don't need to update any proxy
 				continue
 			}

@@ -432,10 +432,14 @@ func TestServiceEntrySelectsPods(t *testing.T) {
 	t.Run("pod that stops matching the selector is dropped", func(t *testing.T) {
 		pods.CreateOrUpdateStatus(testPod(nil))
 		expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
+		updates := sd.XdsUpdater.(*xdsfake.Updater)
+		updates.MatchOrFail(t, Event{Type: "proxy", ID: "1.2.3.4"})
+		updates.Clear()
 		pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
 			p.Labels["app"] = "other"
 		}))
 		expectPodEndpoints(t, nil)
+		updates.MatchOrFail(t, Event{Type: "proxy", ID: "1.2.3.4"})
 	})
 
 	t.Run("deleted pod is dropped", func(t *testing.T) {
