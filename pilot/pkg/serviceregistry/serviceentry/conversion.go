@@ -346,7 +346,7 @@ func convertServiceEntryToInstances(
 	out := make([]*WorkloadServiceInstance, 0, len(serviceEntry.Ports)*endpointsNum)
 	if hostnameToServiceInstance {
 		// The endpoint comes from the ServiceEntry itself, like inline endpoints, which are WorkloadEntry kind.
-		uidPrefix := workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), cfg.Namespace, cfg.Name, service)
+		uidPrefix := workloadServiceInstanceUIDPrefix(model.WorkloadEntryKind.String(), clusterID, cfg.Namespace, cfg.Name, service)
 		for _, servicePort := range service.Ports {
 			// Note: only convert the hostname to service instance if WorkloadSelector is not set
 			// when service entry has discovery type DNS and no endpoints.
@@ -420,7 +420,7 @@ func appendWorkloadInstanceToInstances(
 	if unixAddress {
 		addrs = []string{strings.TrimPrefix(addrs[0], model.UnixAddressPrefix)}
 	}
-	uidPrefix := workloadServiceInstanceUIDPrefix(workloadInstance.Kind.String(), workloadInstance.Namespace, workloadInstance.Name, service)
+	uidPrefix := workloadServiceInstanceUIDPrefix(workloadInstance.Kind.String(), workloadInstance.Cluster, workloadInstance.Namespace, workloadInstance.Name, service)
 	for _, servicePort := range service.Ports {
 		var targetPort uint32
 		// priority level: unixAddress > we.ports > se.port.targetPort > se.port.number
@@ -445,6 +445,7 @@ func appendWorkloadInstanceToInstances(
 
 		instance := &WorkloadServiceInstance{
 			UID:         workloadServiceInstanceUID(uidPrefix, servicePort),
+			WorkloadKey: workloadInstance.ResourceName(),
 			Namespace:   workloadInstance.Namespace,
 			Name:        workloadInstance.Name,
 			Endpoint:    ep,
@@ -463,8 +464,8 @@ func appendWorkloadInstanceToInstances(
 // The endpoint is deliberately left out: a workload yields exactly one endpoint per service port, so it
 // adds nothing to uniqueness, and keeping the address out makes an address change an update of the
 // same instance rather than a delete and add.
-func workloadServiceInstanceUIDPrefix(kind, namespace, name string, service *model.Service) string {
-	return kind + "/" + namespace + "/" + name + "/" + service.ResourceName() + "/"
+func workloadServiceInstanceUIDPrefix(kind string, clusterID cluster.ID, namespace, name string, service *model.Service) string {
+	return kind + "/" + clusterID.String() + "/" + namespace + "/" + name + "/" + service.ResourceName() + "/"
 }
 
 func workloadServiceInstanceUID(prefix string, servicePort *model.Port) string {

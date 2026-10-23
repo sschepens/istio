@@ -140,7 +140,7 @@ func (n *NodeUntainter) setup(stop <-chan struct{}, debugger *krt.DebugHandler) 
 		if !n.ztunnellabels.SubsetOf(p.ObjectMeta.Labels) {
 			return nil
 		}
-		if !IsPodReadyConditionTrue(p.Status) {
+		if !kubelib.IsPodReadyConditionTrue(p.Status) {
 			return nil
 		}
 		log.Debugf("ztunnel pod %s on node %s ready!", p.Name, p.Spec.NodeName)

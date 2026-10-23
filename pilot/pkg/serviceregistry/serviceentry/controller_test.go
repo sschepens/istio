@@ -230,15 +230,32 @@ func TestWorkloadEntryHealthEvents(t *testing.T) {
 				} else {
 					events.WaitOrdered(workloadEvent{model.EventDelete, model.Healthy, false})
 				}
-				// With health checks disabled, the same unhealthy status is ignored.
-				test.SetForTest(t, &features.WorkloadEntryHealthChecks, false)
-				cfg.Spec.(*networking.WorkloadEntry).Address = "3.3.3.3"
-				createConfigs([]*config.Config{&cfg}, store, t)
-				events.WaitOrdered(workloadEvent{event, model.Healthy, sendUnhealthy})
-				deleteConfigs([]*config.Config{&cfg}, store, t)
-				events.WaitOrdered(workloadEvent{model.EventDelete, model.Healthy, sendUnhealthy})
+
 			})
 		}
+	}
+}
+
+func TestWorkloadEntryHealthChecksDisabled(t *testing.T) {
+	for _, workloadOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("workloadOnly=%v", workloadOnly), func(t *testing.T) {
+			test.SetForTest(t, &features.WorkloadEntryHealthChecks, false)
+			store, sd, _ := initServiceDiscoveryWithOpts(t, workloadOnly)
+			events := assert.NewTracker[model.HealthStatus](t)
+			sd.AppendWorkloadHandler(func(wi *model.WorkloadInstance, event model.Event) {
+				if event != model.EventDelete {
+					events.Record(wi.Endpoint.HealthStatus)
+				}
+			})
+			cfg := config.Config{
+				Meta: config.Meta{GroupVersionKind: gvk.WorkloadEntry, Name: "workload", Namespace: "default",
+					Annotations: map[string]string{status.WorkloadEntryHealthCheckAnnotation: "true"}},
+				Spec: &networking.WorkloadEntry{Address: "2.2.2.2"},
+			}
+			cfg = status.UpdateIstioConfigCondition(cfg, &metav1alpha1.IstioCondition{Type: status.ConditionHealthy, Status: status.StatusFalse})
+			createConfigs([]*config.Config{&cfg}, store, t)
+			events.WaitOrdered(model.Healthy)
+		})
 	}
 }
 
