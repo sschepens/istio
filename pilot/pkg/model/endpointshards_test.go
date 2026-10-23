@@ -235,35 +235,43 @@ func TestDeleteServiceShard(t *testing.T) {
 
 	t.Run("unknown service", func(t *testing.T) {
 		endpoints := setup()
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), false)
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false)
+		_, ok := endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, false)
 	})
 
 	t.Run("deletes the shard and the keys", func(t *testing.T) {
 		endpoints := setup(c1Key)
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), true)
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false)
 		_, ok := endpoints.ShardsForService("foo.com", "foo")
 		assert.Equal(t, ok, false)
 		// Deleting it again is a no-op.
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), false)
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false)
+		_, ok = endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, false)
 	})
 
 	t.Run("keeps the keys while other shards have endpoints", func(t *testing.T) {
 		endpoints := setup(c1Key, c2Key)
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), true)
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false)
 		eps, ok := endpoints.ShardsForService("foo.com", "foo")
 		assert.Equal(t, ok, true)
-		assert.Equal(t, len(eps.Shards), 1)
+		assert.Equal(t, eps.Shards, map[ShardKey][]*IstioEndpoint{c2Key: {endpoint}})
 		// The shard is already gone and the other shard keeps the keys, so there is nothing to delete.
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), false)
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false)
+		eps, ok = endpoints.ShardsForService("foo.com", "foo")
+		assert.Equal(t, ok, true)
+		assert.Equal(t, eps.Shards, map[ShardKey][]*IstioEndpoint{c2Key: {endpoint}})
 	})
 
 	t.Run("deletes keys preserved by an earlier deletion", func(t *testing.T) {
 		endpoints := setup(c1Key)
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", true), true)
-		_, ok := endpoints.ShardsForService("foo.com", "foo")
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", true)
+		eps, ok := endpoints.ShardsForService("foo.com", "foo")
 		assert.Equal(t, ok, true)
-		// The shard has no endpoints, but deleting the keys still counts as a deletion.
-		assert.Equal(t, endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false), true)
+		assert.Equal(t, len(eps.Shards), 0)
+		// A later service deletion removes the preserved keys, even without endpoints.
+		endpoints.DeleteServiceShard(c1Key, "foo.com", "foo", false)
 		_, ok = endpoints.ShardsForService("foo.com", "foo")
 		assert.Equal(t, ok, false)
 	})

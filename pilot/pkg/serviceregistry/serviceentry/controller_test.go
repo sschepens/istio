@@ -97,20 +97,6 @@ func makeWorkloadEntryInstanceWithServiceAccount(cfg *config.Config, workloadNam
 	return i
 }
 
-// shardDeleteUpdater is an xdsfake.Updater that, like the DiscoveryServer, treats a service deletion that finds no
-// endpoint shards to delete as a no-op, and reports no event for it.
-type shardDeleteUpdater struct {
-	*xdsfake.Updater
-	index *model.EndpointIndex
-}
-
-func (u *shardDeleteUpdater) SvcUpdate(shard model.ShardKey, hostname string, namespace string, event model.Event) {
-	if event == model.EventDelete && !u.index.DeleteServiceShard(shard, hostname, namespace, false) {
-		return
-	}
-	u.Updater.SvcUpdate(shard, hostname, namespace, event)
-}
-
 func initServiceDiscovery(t test.Failer) (model.ConfigStore, *Controller, *xdsfake.Updater) {
 	return initServiceDiscoveryWithOpts(t, false)
 }
@@ -159,7 +145,6 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	endpoints := model.NewEndpointIndex(model.DisabledCache{})
 	delegate := model.NewEndpointIndexUpdater(endpoints)
 	xdsUpdater := xdsfake.NewWithDelegate(delegate)
-	updater := &shardDeleteUpdater{Updater: xdsUpdater, index: endpoints}
 
 	meshcfg := meshwatcher.NewTestWatcher(mesh.DefaultMeshConfig())
 	client := kube.NewFakeClient()
@@ -174,9 +159,9 @@ func initServiceDiscoveryWithOpts(t test.Failer, workloadOnly bool, opts ...Opti
 	istioStore := configController
 	var controller *Controller
 	if !workloadOnly {
-		controller = NewController(configController, updater, multiclusterController, meshcfg, opts...)
+		controller = NewController(configController, xdsUpdater, multiclusterController, meshcfg, opts...)
 	} else {
-		controller = NewWorkloadEntryController(configController, updater, multiclusterController, meshcfg, opts...)
+		controller = NewWorkloadEntryController(configController, xdsUpdater, multiclusterController, meshcfg, opts...)
 	}
 	assert.NoError(t, multiclusterController.Run(stop))
 	client.RunAndWait(stop)
@@ -387,7 +372,7 @@ func TestServiceEndpointLifetimeWithoutEndpoints(t *testing.T) {
 	deleted.Empty()
 
 	deleteConfigs([]*config.Config{&overlay}, store, t)
-	expectEvents(t, fx, Event{Type: "xds", ID: hostname})
+	expectEvents(t, fx, Event{Type: "service", ID: hostname}, Event{Type: "xds", ID: hostname})
 	deleted.WaitOrdered(key)
 	assert.Equal(t, sd.outputs.ServiceInstancesByNamespaceHost.GetKey(key), nil)
 }
@@ -1132,8 +1117,8 @@ func TestDnsRoundRobinLBServiceTargetsIgnoreDeduplication(t *testing.T) {
 				ServiceAccount: "default",
 			})
 			return wle, []*WorkloadServiceInstance{
-				makeInstanceWithServiceAccount(se, name, []string{address}, 444, ports[0], map[string]string{"app": "wle"}, "default"),
-				makeInstanceWithServiceAccount(se, name, []string{address}, 445, ports[1], map[string]string{"app": "wle"}, "default"),
+				makeWorkloadEntryInstanceWithServiceAccount(se, name, []string{address}, 444, ports[0], map[string]string{"app": "wle"}, "default"),
+				makeWorkloadEntryInstanceWithServiceAccount(se, name, []string{address}, 445, ports[1], map[string]string{"app": "wle"}, "default"),
 			}
 		}
 		// Instances are ordered by workload name, so wl-a is the one published for every port.
@@ -2522,7 +2507,7 @@ func expectServiceInstances(t testing.TB, sd *Controller, cfg *config.Config, po
 	// The system is eventually consistent, so add some retries
 	retry.UntilSuccessOrFail(t, func() error {
 		for i, svc := range svcs {
-			endpoints := GetEndpointsForPort(svc, sd.XdsUpdater.(*shardDeleteUpdater).index, port)
+			endpoints := GetEndpointsForPort(svc, sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index, port)
 			if endpoints == nil {
 				endpoints = []*model.IstioEndpoint{} // To simplify tests a bit
 			}

@@ -219,12 +219,11 @@ func (e *EndpointIndex) GetOrCreateEndpointShard(serviceName, namespace string) 
 }
 
 // DeleteServiceShard deletes the endpoints of a service in a shard. Unless preserveKeys is set, the
-// service is also removed from the index once no shard has endpoints for it. It returns whether
-// anything was deleted.
-func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) bool {
+// service is also removed from the index once no shard has endpoints for it.
+func (e *EndpointIndex) DeleteServiceShard(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.deleteServiceInner(shard, serviceName, namespace, preserveKeys)
+	e.deleteServiceInner(shard, serviceName, namespace, preserveKeys)
 }
 
 func (e *EndpointIndex) DeleteShard(shardKey ShardKey) {
@@ -260,29 +259,25 @@ func (e *EndpointIndex) PruneShard(shardKey ShardKey, keep map[string]sets.Strin
 }
 
 // must be called with lock
-func (e *EndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespace string, preserveKeys bool) bool {
+func (e *EndpointIndex) deleteServiceInner(shard ShardKey, serviceName, namespace string, preserveKeys bool) {
 	if e.shardsBySvc[serviceName] == nil ||
 		e.shardsBySvc[serviceName][namespace] == nil {
-		return false
+		return
 	}
 	epShards := e.shardsBySvc[serviceName][namespace]
 	epShards.Lock()
-	_, deleted := epShards.Shards[shard]
 	delete(epShards.Shards, shard)
-	if deleted {
-		e.clearCacheForService(serviceName, namespace)
-	}
+	// Clear the cache here to avoid race in cache writes.
+	e.clearCacheForService(serviceName, namespace)
 	if !preserveKeys {
 		if len(epShards.Shards) == 0 {
 			delete(e.shardsBySvc[serviceName], namespace)
-			deleted = true
 		}
 		if len(e.shardsBySvc[serviceName]) == 0 {
 			delete(e.shardsBySvc, serviceName)
 		}
 	}
 	epShards.Unlock()
-	return deleted
 }
 
 // PushType is an enumeration that decides what type push we should do when we get EDS update.

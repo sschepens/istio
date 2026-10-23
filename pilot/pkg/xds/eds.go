@@ -36,10 +36,8 @@ func (s *DiscoveryServer) SvcUpdate(shard model.ShardKey, hostname string, names
 	// When a service deleted, we should cleanup the endpoint shards and also remove keys from EndpointIndex to
 	// prevent memory leaks.
 	if event == model.EventDelete {
-		// A service can be deleted by several handlers; only count the deletion that removed the shards.
-		if s.Env.EndpointIndex.DeleteServiceShard(shard, hostname, namespace, false) {
-			inboundServiceDeletes.Increment()
-		}
+		inboundServiceDeletes.Increment()
+		s.Env.EndpointIndex.DeleteServiceShard(shard, hostname, namespace, false)
 	} else {
 		inboundServiceUpdates.Increment()
 	}
