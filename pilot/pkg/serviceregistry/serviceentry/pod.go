@@ -20,12 +20,14 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"istio.io/api/annotation"
 	"istio.io/api/label"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
 	labelutil "istio.io/istio/pilot/pkg/serviceregistry/util/label"
 	"istio.io/istio/pilot/pkg/serviceregistry/util/meshnetworks"
 	"istio.io/istio/pkg/cluster"
+	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	kubeUtil "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/krt"
@@ -64,9 +66,9 @@ func (s *Controller) buildPodWorkloads() krt.Collection[*model.WorkloadInstance]
 	)
 }
 
-// clusterPodWorkloads derives one cluster's Pods. Only pods that cannot be an endpoint at all are
-// dropped; a pod that is not ready, or is terminating, is kept and reported unhealthy so that it can
-// drain rather than disappear. EDS filters unhealthy endpoints out unless the service asks for them.
+// clusterPodWorkloads derives one cluster's Pods. Terminal and address-less pods are dropped.
+// Unready and terminating pods are marked unhealthy, matching ambient, and retained only when
+// unhealthy endpoints are enabled.
 func (s *Controller) clusterPodWorkloads(c multicluster.ClusterCollections, opts krt.OptionsBuilder) krt.Collection[*model.WorkloadInstance] {
 	// A pod's network is resolved against its own cluster: the topology label on that cluster's system
 	// namespace, and the network whose fromRegistry entry names that cluster.
@@ -77,9 +79,14 @@ func (s *Controller) clusterPodWorkloads(c multicluster.ClusterCollections, opts
 	// each cluster's own meshconfig (Options.MeshWatcher) for this, which differs only in a mesh whose
 	// clusters disagree on trustDomain.
 	return krt.NewCollection(c.Pods(), func(ctx krt.HandlerContext, pod *v1.Pod) **model.WorkloadInstance {
-		// A pod that has completed, or that has no address, can never be an endpoint. Note this is
-		// distinct from a terminating pod (deletionTimestamp set), which is kept and reported unhealthy.
-		if kubeUtil.CheckPodTerminal(pod) || (len(pod.Status.PodIP) == 0 && len(pod.Status.PodIPs) == 0) {
+		if kubeUtil.CheckPodTerminal(pod) {
+			return nil
+		}
+		if len(pod.Status.PodIP) == 0 && len(pod.Status.PodIPs) == 0 {
+			return nil
+		}
+		health := podHealthStatus(pod)
+		if health == model.UnHealthy && !s.flags.SendUnhealthyEndpoints {
 			return nil
 		}
 		wi := convertPodToWorkloadInstance(ctx, pod, nodes, s.inputs.MeshConfig, meshNetworkInfo, c.ID(), s.flags)
@@ -176,6 +183,7 @@ func convertPodToWorkloadInstance(
 			HealthStatus:           podHealthStatus(pod),
 			SendUnhealthyEndpoints: flags.SendUnhealthyEndpoints,
 			NodeName:               nodeName,
+			CapturedByZtunnel:      pod.Annotations[annotation.AmbientRedirection.Name] == constants.AmbientRedirectionEnabled,
 		},
 		PortMap: getPortMap(pod),
 	}

@@ -2234,6 +2234,7 @@ func (ep *IstioEndpoint) Equals(other *IstioEndpoint) bool {
 		ep.SubDomain == other.SubDomain &&
 		ep.HealthStatus == other.HealthStatus &&
 		ep.SendUnhealthyEndpoints == other.SendUnhealthyEndpoints &&
+		ep.CapturedByZtunnel == other.CapturedByZtunnel &&
 		ep.NodeName == other.NodeName
 	if !eq {
 		return false
