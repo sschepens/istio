@@ -178,16 +178,13 @@ func NewMulticluster(
 			// (e.g. during upgrades before RBAC rules are applied to the remote cluster).
 			options.ConfigClusterMeshWatcher = opts.MeshWatcher
 			meshConfigMapName := mc.getMeshConfigMapName()
-			meshSource := kubemesh.NewConfigMapSource(
+			// Keep the optional ConfigMap watch out of the shared client's initial sync.
+			remoteMeshCollection := kubemesh.NewRemoteMeshConfig(
 				client,
 				options.SystemNamespace,
 				meshConfigMapName,
-				kubemesh.MeshConfigKey,
-				krt.NewOptionsBuilder(stop, "", nil),
-			)
-			remoteMeshCollection := meshwatcher.NewCollection(
-				krt.NewOptionsBuilder(stop, "", nil),
-				meshSource,
+				opts.MeshWatcher,
+				krt.NewOptionsBuilder(cluster.GetStop(), "", nil),
 			)
 			options.MeshWatcher = meshwatcher.ConfigAdapter(remoteMeshCollection)
 			log.Infof("Created mesh watcher for remote cluster %q", cluster.ID)

@@ -1,0 +1,10 @@
+apiVersion: release-notes/v2
+kind: bug-fix
+area: traffic-management
+releaseNotes:
+- |
+    **Fixed** an issue where insufficient permissions to read a remote cluster's mesh ConfigMap
+    blocked cluster synchronization, including during credential rotation. Remote clusters now
+    use the config cluster's mesh configuration until the first successful remote read, then
+    automatically switch to the remote configuration. A successful read with no ConfigMap
+    continues to use mesh defaults.
