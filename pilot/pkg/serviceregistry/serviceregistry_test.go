@@ -1000,6 +1000,8 @@ func TestWorkloadInstances(t *testing.T) {
 	})
 
 	t.Run("ServiceEntry selects Pod that is in transit states", func(t *testing.T) {
+		istiotest.SetAtomicBoolForTest(t, features.GlobalSendUnhealthyEndpoints, false)
+		istiotest.SetAtomicBoolForTest(t, features.DefaultSendUnhealthyEndpoints, false)
 		store, kube, fx := setupTest(t)
 		makeIstioObject(t, store, serviceEntry)
 		makePod(t, kube, pod)
@@ -1012,15 +1014,13 @@ func TestWorkloadInstances(t *testing.T) {
 
 		expectServiceEndpointHealth(t, fx, expectedSvc, 80, model.Healthy)
 
-		// When pods become unready the instance stays in the registry, marked unhealthy, so that it can
-		// drain rather than vanish. EDS drops it unless the service asks for unhealthy endpoints.
+		// Unready pods are removed when unhealthy endpoints are disabled.
 		setPodUnready(pod)
 		_, err := kube.CoreV1().Pods(pod.Namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		expectServiceEndpoints(t, fx, expectedSvc, 80, instances)
-		expectServiceEndpointHealth(t, fx, expectedSvc, 80, model.UnHealthy)
+		expectServiceEndpoints(t, fx, expectedSvc, 80, []EndpointResponse{})
 
 		setPodReady(pod)
 		_, err = kube.CoreV1().Pods(pod.Namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})

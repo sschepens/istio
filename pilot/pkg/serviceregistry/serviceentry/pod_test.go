@@ -22,15 +22,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"istio.io/api/annotation"
 	"istio.io/api/label"
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/config/memory"
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/util/meshnetworks"
 	"istio.io/istio/pilot/pkg/serviceregistry/util/xdsfake"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
+	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/collections"
@@ -216,17 +219,6 @@ func TestConvertPodToWorkloadInstance(t *testing.T) {
 			},
 		},
 		{
-			name: "terminating pod is unhealthy but still an endpoint",
-			pod: testPod(func(p *corev1.Pod) {
-				now := metav1.Now()
-				p.DeletionTimestamp = &now
-			}),
-			assertion: func(t *testing.T, wi *model.WorkloadInstance) {
-				assert.Equal(t, wi.Endpoint.HealthStatus, model.UnHealthy)
-				assert.Equal(t, wi.Endpoint.Addresses, []string{"1.2.3.4"})
-			},
-		},
-		{
 			name: "native sidecar init container ports are in the port map",
 			pod: testPod(func(p *corev1.Pod) {
 				always := corev1.ContainerRestartPolicyAlways
@@ -332,6 +324,16 @@ func initPodServiceDiscovery(t test.Failer, networks *meshconfig.MeshNetworks) (
 }
 
 func TestServiceEntrySelectsPods(t *testing.T) {
+	for _, flags := range []struct{ defaults, global bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		t.Run(fmt.Sprintf("default=%v/global=%v", flags.defaults, flags.global), func(t *testing.T) {
+			test.SetAtomicBoolForTest(t, features.DefaultSendUnhealthyEndpoints, flags.defaults)
+			test.SetAtomicBoolForTest(t, features.GlobalSendUnhealthyEndpoints, flags.global)
+			testServiceEntrySelectsPods(t, flags.defaults || flags.global)
+		})
+	}
+}
+
+func testServiceEntrySelectsPods(t *testing.T, sendUnhealthy bool) {
 	store, sd, client := initPodServiceDiscovery(t, nil)
 	pods := clienttest.NewWriter[*corev1.Pod](t, client)
 	clienttest.NewWriter[*corev1.Node](t, client).Create(&corev1.Node{
@@ -372,7 +374,23 @@ func TestServiceEntrySelectsPods(t *testing.T) {
 					got = append(got, i.Endpoint.FirstAddressOrNil()+"/"+health)
 				}
 			}
-			return assert.Compare(slices.Sort(got), want)
+			if err := assert.Compare(slices.Sort(got), want); err != nil {
+				return err
+			}
+			services := sd.Services()
+			if len(services) != 1 {
+				return fmt.Errorf("expected one service, got %d", len(services))
+			}
+			index := sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index
+			var published []string
+			for _, ep := range GetEndpointsForPort(services[0], index, 444) {
+				health := "healthy"
+				if ep.HealthStatus == model.UnHealthy {
+					health = "unhealthy"
+				}
+				published = append(published, ep.FirstAddressOrNil()+"/"+health)
+			}
+			return assert.Compare(slices.Sort(published), want)
 		}, retry.Timeout(time.Second*5))
 	}
 
@@ -391,32 +409,82 @@ func TestServiceEntrySelectsPods(t *testing.T) {
 		}, retry.Timeout(time.Second*5))
 	})
 
-	t.Run("pod that goes unready stays, marked unhealthy", func(t *testing.T) {
-		pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
-			p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}}
-		}))
-		expectPodEndpoints(t, []string{"1.2.3.4/unhealthy"})
-		pods.CreateOrUpdateStatus(testPod(nil))
-		expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
+	t.Run("ambient capture annotation updates published endpoints", func(t *testing.T) {
+		index := sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index
+		for _, tc := range []struct {
+			name        string
+			annotations map[string]string
+			captured    bool
+		}{
+			{name: "absent"},
+			{name: "enabled", annotations: map[string]string{annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled}, captured: true},
+			{name: "disabled", annotations: map[string]string{annotation.AmbientRedirection.Name: "disabled"}},
+			{name: "enabled again", annotations: map[string]string{annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled}, captured: true},
+			{name: "removed"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
+					p.Annotations = tc.annotations
+				}))
+				retry.UntilSuccessOrFail(t, func() error {
+					services := sd.Services()
+					if len(services) != 1 {
+						return fmt.Errorf("expected one service, got %d", len(services))
+					}
+					endpoints := GetEndpointsForPort(services[0], index, 444)
+					if len(endpoints) != 1 {
+						return fmt.Errorf("expected one endpoint, got %d", len(endpoints))
+					}
+					return assert.Compare(endpoints[0].CapturedByZtunnel, tc.captured)
+				}, retry.Timeout(time.Second*5))
+			})
+		}
 	})
 
-	t.Run("terminating pod stays, marked unhealthy", func(t *testing.T) {
-		pods.CreateOrUpdateStatus(testPod(nil))
-		expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
-		now := metav1.Now()
-		pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
-			p.DeletionTimestamp = &now
-		}))
-		expectPodEndpoints(t, []string{"1.2.3.4/unhealthy"})
+	t.Run("unready pod follows unhealthy endpoint settings", func(t *testing.T) {
+		for _, conditions := range [][]corev1.PodCondition{
+			{{Type: corev1.PodReady, Status: corev1.ConditionFalse}},
+			nil,
+		} {
+			pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
+				p.Status.Conditions = conditions
+			}))
+			var want []string
+			if sendUnhealthy {
+				want = []string{"1.2.3.4/unhealthy"}
+			}
+			expectPodEndpoints(t, want)
+			pods.CreateOrUpdateStatus(testPod(nil))
+			expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
+		}
+	})
+
+	t.Run("terminating pod follows unhealthy endpoint settings regardless of readiness", func(t *testing.T) {
+		for _, ready := range []corev1.ConditionStatus{corev1.ConditionTrue, corev1.ConditionFalse} {
+			pods.CreateOrUpdateStatus(testPod(nil))
+			expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
+			now := metav1.Now()
+			pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
+				p.DeletionTimestamp = &now
+				p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: ready}}
+			}))
+			var want []string
+			if sendUnhealthy {
+				want = []string{"1.2.3.4/unhealthy"}
+			}
+			expectPodEndpoints(t, want)
+		}
 	})
 
 	t.Run("pod that reaches a terminal phase is dropped", func(t *testing.T) {
-		pods.CreateOrUpdateStatus(testPod(nil))
-		expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
-		pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
-			p.Status.Phase = corev1.PodSucceeded
-		}))
-		expectPodEndpoints(t, nil)
+		for _, phase := range []corev1.PodPhase{corev1.PodSucceeded, corev1.PodFailed} {
+			pods.CreateOrUpdateStatus(testPod(nil))
+			expectPodEndpoints(t, []string{"1.2.3.4/healthy"})
+			pods.CreateOrUpdateStatus(testPod(func(p *corev1.Pod) {
+				p.Status.Phase = phase
+			}))
+			expectPodEndpoints(t, nil)
+		}
 	})
 
 	t.Run("pod that loses its IP is dropped", func(t *testing.T) {
