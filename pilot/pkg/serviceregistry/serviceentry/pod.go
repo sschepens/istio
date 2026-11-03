@@ -74,10 +74,9 @@ func (s *Controller) clusterPodWorkloads(c multicluster.ClusterCollections, opts
 	// namespace, and the network whose fromRegistry entry names that cluster.
 	meshNetworkInfo := meshnetworks.NewClusterSingleton(c.Namespaces(), s.meshNetworksWatcher, s.systemNamespace, c.ID(), opts)
 	nodes := c.Nodes()
-	// The mesh config is the config cluster's, including for a remote cluster's pods, so their
-	// ServiceAccount SAN is built with the local trust domain. The Kubernetes registry instead reads
-	// each cluster's own meshconfig (Options.MeshWatcher) for this, which differs only in a mesh whose
-	// clusters disagree on trustDomain.
+	// Use the same per-cluster trust domain as the Kubernetes registry. Fetching the restricted
+	// mesh config in the transformation also recomputes pod SANs when that trust domain changes.
+	meshConfig := c.MeshConfig().AsCollection()
 	return krt.NewCollection(c.Pods(), func(ctx krt.HandlerContext, pod *v1.Pod) **model.WorkloadInstance {
 		if kubeUtil.CheckPodTerminal(pod) {
 			return nil
@@ -89,7 +88,7 @@ func (s *Controller) clusterPodWorkloads(c multicluster.ClusterCollections, opts
 		if health == model.UnHealthy && !s.flags.SendUnhealthyEndpoints {
 			return nil
 		}
-		wi := convertPodToWorkloadInstance(ctx, pod, nodes, s.inputs.MeshConfig, meshNetworkInfo, c.ID(), s.flags)
+		wi := convertPodToWorkloadInstance(ctx, pod, nodes, meshConfig, meshNetworkInfo, c.ID(), s.flags)
 		return &wi
 	}, append(
 		opts.WithName(fmt.Sprintf("outputs/PodWorkloadInstances[%s]", c.ID())),
@@ -124,7 +123,7 @@ func convertPodToWorkloadInstance(
 	ctx krt.HandlerContext,
 	pod *v1.Pod,
 	nodes krt.Collection[*v1.Node],
-	meshConfig krt.Collection[meshwatcher.MeshConfigResource],
+	meshConfig krt.Collection[meshwatcher.RestrictedMeshConfig],
 	meshNetworkInfo krt.Singleton[meshnetworks.MeshNetworkInfo],
 	clusterID cluster.ID,
 	flags FeatureFlags,
@@ -167,7 +166,7 @@ func convertPodToWorkloadInstance(
 		Kind:      model.PodKind,
 		Endpoint: &model.IstioEndpoint{
 			Labels:         lbls,
-			ServiceAccount: kube.SecureNamingSAN(pod, mesh.GetTrustDomain()),
+			ServiceAccount: kube.SecureNamingSAN(pod, mesh.TrustDomain),
 			Locality: model.Locality{
 				Label:     locality,
 				ClusterID: clusterID,

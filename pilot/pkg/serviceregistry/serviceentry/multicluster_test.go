@@ -39,6 +39,7 @@ import (
 	"istio.io/istio/pkg/config/schema/collections"
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube"
+	"istio.io/istio/pkg/kube/kclient/clienttest"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
 	"istio.io/istio/pkg/slices"
@@ -77,9 +78,9 @@ func nodeWithLocality(name, region, zone string) *corev1.Node {
 // remote cluster, registered later by creating the multicluster secret. configObjects and
 // remoteObjects seed each cluster's API server; the returned functions create and delete the secret,
 // each waiting for the cluster to appear or disappear. The remote cluster is deleted on cleanup
-// whether or not a test does it itself.
+// whether or not a test does it itself. The remote client allows tests to update its resources.
 func initMulticlusterServiceDiscovery(t test.Failer, networks *meshconfig.MeshNetworks, configObjects, remoteObjects []runtime.Object) (
-	model.ConfigStore, *Controller, func(), func(),
+	model.ConfigStore, *Controller, func(), func(), kube.Client,
 ) {
 	configController := memory.NewController(collections.Pilot, false)
 
@@ -91,6 +92,7 @@ func initMulticlusterServiceDiscovery(t test.Failer, networks *meshconfig.MeshNe
 
 	meshcfg := meshwatcher.NewTestWatcher(mesh.DefaultMeshConfig())
 	client := kube.NewFakeClient(configObjects...)
+	remoteClient := kube.NewFakeClient(remoteObjects...)
 	multiclusterController := multicluster.NewController(multicluster.ControllerOptions{
 		Client:          client,
 		ClusterID:       configClusterID,
@@ -98,7 +100,7 @@ func initMulticlusterServiceDiscovery(t test.Failer, networks *meshconfig.MeshNe
 		MeshConfig:      meshcfg,
 		Debugger:        krt.GlobalDebugHandler,
 		ClientBuilder: func(kubeConfig []byte, clusterID cluster.ID, configOverrides ...func(*rest.Config)) (kube.Client, error) {
-			return kube.NewFakeClient(remoteObjects...), nil
+			return remoteClient, nil
 		},
 	})
 
@@ -146,7 +148,7 @@ func initMulticlusterServiceDiscovery(t test.Failer, networks *meshconfig.MeshNe
 	// Registered after test.NewStop above, so it runs before the stop channel closes.
 	t.Cleanup(deleteCluster)
 
-	return configController, controller, addCluster, deleteCluster
+	return configController, controller, addCluster, deleteCluster, remoteClient
 }
 
 // TestServiceEntrySelectsRemoteClusterPods covers a ServiceEntry selecting Pods of a remote cluster.
@@ -163,7 +165,7 @@ func TestServiceEntrySelectsRemoteClusterPods(t *testing.T) {
 		p.Status.PodIP = "5.6.7.8"
 		p.Status.PodIPs = []corev1.PodIP{{IP: "5.6.7.8"}}
 	})
-	store, sd, addCluster, deleteCluster := initMulticlusterServiceDiscovery(t, nil,
+	store, sd, addCluster, deleteCluster, _ := initMulticlusterServiceDiscovery(t, nil,
 		[]runtime.Object{
 			namespaceWithNetwork(systemNamespace, "local-network"),
 			nodeWithLocality("local-node", "region1", "zone1"),
@@ -259,7 +261,7 @@ func TestServiceEntrySelectsRemoteClusterPodsMeshNetworks(t *testing.T) {
 		p.Status.PodIP = "5.6.7.8"
 		p.Status.PodIPs = []corev1.PodIP{{IP: "5.6.7.8"}}
 	})
-	store, sd, addCluster, _ := initMulticlusterServiceDiscovery(t, networks,
+	store, sd, addCluster, _, _ := initMulticlusterServiceDiscovery(t, networks,
 		// Neither system namespace is labelled, so the network can only come from MeshNetworks.
 		[]runtime.Object{
 			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: systemNamespace}},
@@ -298,4 +300,64 @@ func TestServiceEntrySelectsRemoteClusterPodsMeshNetworks(t *testing.T) {
 		}
 		return assert.Compare(slices.Sort(got), []string{"1.2.3.4/local-network", "5.6.7.8/remote-network"})
 	}, retry.Timeout(time.Second*30))
+}
+
+func TestServiceEntryRemotePodTrustDomain(t *testing.T) {
+	localPod := testPod(func(p *corev1.Pod) { p.Spec.NodeName = "" })
+	remotePod := testPod(func(p *corev1.Pod) {
+		p.Spec.NodeName = ""
+		p.Status.PodIP = "5.6.7.8"
+		p.Status.PodIPs = []corev1.PodIP{{IP: "5.6.7.8"}}
+	})
+	store, sd, addCluster, _, remoteClient := initMulticlusterServiceDiscovery(t, nil,
+		[]runtime.Object{localPod}, []runtime.Object{remotePod})
+	createConfigs([]*config.Config{{
+		Meta: config.Meta{GroupVersionKind: gvk.ServiceEntry, Name: "selector", Namespace: "ns1"},
+		Spec: &networking.ServiceEntry{
+			Hosts:            []string{"selector.com"},
+			Ports:            []*networking.ServicePort{{Number: 444, Name: "http", Protocol: "http"}},
+			WorkloadSelector: &networking.WorkloadSelector{Labels: map[string]string{"app": "wle"}},
+			Resolution:       networking.ServiceEntry_STATIC,
+		},
+	}}, store, t)
+	addCluster()
+
+	// Check the published endpoint index, including that the local pod keeps its own identity.
+	index := sd.XdsUpdater.(*xdsfake.Updater).Delegate.(*model.FakeEndpointIndexUpdater).Index
+	expectTrustDomain := func(remoteDomain string) {
+		t.Helper()
+		retry.UntilSuccessOrFail(t, func() error {
+			services := sd.Services()
+			if len(services) != 1 {
+				return fmt.Errorf("expected one service, got %d", len(services))
+			}
+			var got []string
+			for _, ep := range GetEndpointsForPort(services[0], index, 444) {
+				got = append(got, fmt.Sprintf("%s/%s", ep.Locality.ClusterID, ep.ServiceAccount))
+			}
+			return assert.Compare(slices.Sort(got), []string{
+				"config-cluster/spiffe://cluster.local/ns/ns1/sa/sa1",
+				"remote-cluster/spiffe://" + remoteDomain + "/ns/ns1/sa/sa1",
+			})
+		}, retry.Timeout(5*time.Second))
+	}
+
+	// No remote mesh config falls back to the config cluster's trust domain.
+	expectTrustDomain("cluster.local")
+	configMaps := clienttest.NewWriter[*corev1.ConfigMap](t, remoteClient)
+	remoteMesh := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "istio", Namespace: systemNamespace},
+		Data:       map[string]string{"mesh": "trustDomain: remote.example"},
+	}
+	configMaps.Create(remoteMesh)
+	expectTrustDomain("remote.example")
+
+	// A mesh config update alone must recompute the SAN; the pod is unchanged.
+	remoteMesh = remoteMesh.DeepCopy()
+	remoteMesh.Data["mesh"] = "trustDomain: updated.remote.example"
+	configMaps.Update(remoteMesh)
+	expectTrustDomain("updated.remote.example")
+
+	configMaps.Delete("istio", systemNamespace)
+	expectTrustDomain("cluster.local")
 }

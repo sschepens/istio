@@ -238,7 +238,7 @@ func TestConvertPodToWorkloadInstance(t *testing.T) {
 			stop := test.NewStop(t)
 			nodes := krt.NewStaticCollection(nil, tt.nodes, krt.WithStop(stop), krt.WithDebugging(krt.GlobalDebugHandler))
 			networkInfo := krt.NewStatic(&tt.networkInfo, true)
-			meshConfig := meshwatcher.NewTestWatcher(mesh.DefaultMeshConfig()).AsCollection()
+			meshConfig := krt.NewStatic(&meshwatcher.RestrictedMeshConfig{TrustDomain: "cluster.local"}, true).AsCollection()
 
 			wi := convertPodToWorkloadInstance(krt.TestingDummyContext{}, tt.pod, nodes, meshConfig, networkInfo, podClusterID, testFeatureFlags())
 			tt.assertion(t, wi)
@@ -279,7 +279,7 @@ func convertTestPod(t test.Failer, pod *corev1.Pod, flags FeatureFlags) *model.W
 		krt.TestingDummyContext{},
 		pod,
 		krt.NewStaticCollection[*corev1.Node](nil, nil, krt.WithStop(stop), krt.WithDebugging(krt.GlobalDebugHandler)),
-		meshwatcher.NewTestWatcher(mesh.DefaultMeshConfig()).AsCollection(),
+		krt.NewStatic(&meshwatcher.RestrictedMeshConfig{TrustDomain: "cluster.local"}, true).AsCollection(),
 		krt.NewStatic(&meshnetworks.MeshNetworkInfo{}, true),
 		podClusterID,
 		flags,
