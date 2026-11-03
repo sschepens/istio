@@ -114,8 +114,8 @@ func ztunnelNamespaces(sysNs string) sets.String {
 
 func (n *NodeUntainter) setup(stop <-chan struct{}, debugger *krt.DebugHandler) {
 	opts := krt.NewOptionsBuilder(stop, "node-untaint", debugger)
-	nodes := krt.WrapClient[*v1.Node](n.nodesClient, opts.WithName("nodes")...)
-	pods := krt.WrapClient[*v1.Pod](n.podsClient, opts.WithName("pods")...)
+	nodes := krt.WrapClient(n.nodesClient, opts.WithName("nodes")...)
+	pods := krt.WrapClient(n.podsClient, opts.WithName("pods")...)
 
 	readyCniPods := krt.NewCollection(pods, func(ctx krt.HandlerContext, p *v1.Pod) **v1.Pod {
 		log.Debugf("cniPods event: %s", p.Name)
@@ -125,7 +125,7 @@ func (n *NodeUntainter) setup(stop <-chan struct{}, debugger *krt.DebugHandler) 
 		if !n.cnilabels.SubsetOf(p.ObjectMeta.Labels) {
 			return nil
 		}
-		if !kubelib.IsPodReadyConditionTrue(p.Status) {
+		if !kubelib.IsPodReady(p) {
 			return nil
 		}
 		log.Debugf("pod %s on node %s ready!", p.Name, p.Spec.NodeName)
@@ -140,7 +140,7 @@ func (n *NodeUntainter) setup(stop <-chan struct{}, debugger *krt.DebugHandler) 
 		if !n.ztunnellabels.SubsetOf(p.ObjectMeta.Labels) {
 			return nil
 		}
-		if !kubelib.IsPodReadyConditionTrue(p.Status) {
+		if !kubelib.IsPodReady(p) {
 			return nil
 		}
 		log.Debugf("ztunnel pod %s on node %s ready!", p.Name, p.Spec.NodeName)
