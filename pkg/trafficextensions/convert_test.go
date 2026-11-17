@@ -24,9 +24,13 @@ import (
 	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	rbacv3 "github.com/envoyproxy/go-control-plane/envoy/config/rbac/v3"
+	httpdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
 	rbac "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/rbac/v3"
 	wasm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/wasm/v3"
+	networkdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/dynamic_modules/v3"
+	networkwasm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/wasm/v3"
 	v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/wasm/v3"
+	dto "github.com/prometheus/client_model/go"
 	"google.golang.org/protobuf/proto"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -36,6 +40,7 @@ import (
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/config/xds"
 	pm "istio.io/istio/pkg/model"
+	"istio.io/istio/pkg/monitoring/monitortest"
 	"istio.io/istio/pkg/util/protomarshal"
 )
 
@@ -506,4 +511,115 @@ var extensionConfigMap = map[string]*core.TypedExtensionConfig{
 			},
 		},
 	}),
+}
+
+// Exercise dispatch across different filter types in the same ECDS response.
+func TestMixedExtensionConversion(t *testing.T) {
+	metrics := monitortest.New(t)
+	durationSamples := conversionDurationSamples(t)
+	httpWasm := &wasm.Wasm{}
+	if err := extensionConfigMap["remote-load-success-without-typed-struct"].TypedConfig.UnmarshalTo(httpWasm); err != nil {
+		t.Fatal(err)
+	}
+	networkWasm := protoconv.MessageToAny(&core.TypedExtensionConfig{Name: "network-wasm", TypedConfig: protoconv.MessageToAny(&networkwasm.Wasm{Config: httpWasm.Config})})
+	pluginConfig := protoconv.MessageToAny(newStruct(t, map[string]any{"key": "value"}))
+	envelope, err := (&pm.DynamicModuleConfigEnvelope{FilterConfig: pluginConfig}).ToAny()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{
+		HttpUri: &core.HttpUri{Uri: "http://test?module=dynamic.so"},
+	}}}
+	localWasm := protoconv.MessageToAny(extensionConfigMap["remote-load-success-local-file"])
+	unrelated, err := createHTTPDefaultFilter("other", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resources := []*anypb.Any{
+		protoconv.MessageToAny(extensionConfigMap["remote-load-success"]),
+		protoconv.MessageToAny(extensionConfigMap["remote-load-success-without-typed-struct"]),
+		networkWasm,
+		dynamicModuleResource(t, false, source, envelope),
+		dynamicModuleResource(t, true, source, envelope),
+		localWasm,
+		unrelated,
+	}
+	if err := MaybeConvertExtensionConfig(resources, &mockCache{}); err != nil {
+		t.Fatal(err)
+	}
+	metrics.Assert(trafficExtensionConfigConversionCount.Name(), map[string]string{"extension_type": wasmExtensionType, "result": conversionSuccess}, monitortest.Exactly(3))
+	metrics.Assert(trafficExtensionConfigConversionCount.Name(), map[string]string{"extension_type": dynamicModuleExtensionType, "result": conversionSuccess}, monitortest.Exactly(2))
+	metrics.Assert(trafficExtensionConfigConversionCount.Name(), map[string]string{"extension_type": wasmExtensionType, "result": noRemoteLoad}, monitortest.Exactly(1))
+	for extensionType, count := range map[string]uint64{wasmExtensionType: 4, dynamicModuleExtensionType: 2} {
+		metrics.Assert(trafficExtensionConfigConversionDuration.Name(), map[string]string{"extension_type": extensionType}, func(value any) error {
+			got := value.(*dto.Histogram).GetSampleCount() - durationSamples[extensionType]
+			if got != count {
+				return fmt.Errorf("got %d duration samples, want %d", got, count)
+			}
+			return nil
+		})
+	}
+
+	for _, resource := range resources[:2] {
+		expected := protoconv.MessageToAny(extensionConfigMap["remote-load-success-local-file"])
+		if !proto.Equal(resource, expected) {
+			t.Fatal("HTTP Wasm conversion changed")
+		}
+	}
+	ec := &core.TypedExtensionConfig{}
+	if err := resources[2].UnmarshalTo(ec); err != nil {
+		t.Fatal(err)
+	}
+	network := &networkwasm.Wasm{}
+	if err := ec.TypedConfig.UnmarshalTo(network); err != nil {
+		t.Fatal(err)
+	}
+	if network.GetConfig().GetVmConfig().GetCode().GetLocal().GetFilename() != "test.wasm" {
+		t.Fatal("network Wasm not converted")
+	}
+	if err := resources[3].UnmarshalTo(ec); err != nil {
+		t.Fatal(err)
+	}
+	httpModule := &httpdynamic.DynamicModuleFilter{}
+	if err := ec.TypedConfig.UnmarshalTo(httpModule); err != nil {
+		t.Fatal(err)
+	}
+	if httpModule.GetDynamicModuleConfig().GetModule().GetLocal().GetFilename() != "dynamic.so" || !proto.Equal(httpModule.FilterConfig, pluginConfig) {
+		t.Fatal("HTTP module not converted")
+	}
+	if err := resources[4].UnmarshalTo(ec); err != nil {
+		t.Fatal(err)
+	}
+	networkModule := &networkdynamic.DynamicModuleNetworkFilter{}
+	if err := ec.TypedConfig.UnmarshalTo(networkModule); err != nil {
+		t.Fatal(err)
+	}
+	if networkModule.GetDynamicModuleConfig().GetModule().GetLocal().GetFilename() != "dynamic.so" || !proto.Equal(networkModule.FilterConfig, pluginConfig) {
+		t.Fatal("network module not converted")
+	}
+	if !proto.Equal(resources[5], localWasm) || !proto.Equal(resources[6], unrelated) {
+		t.Fatal("unrelated or local filter was modified")
+	}
+}
+
+func conversionDurationSamples(t *testing.T) map[string]uint64 {
+	t.Helper()
+	families, err := monitortest.TestRegistry(t).Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := map[string]uint64{}
+	for _, family := range families {
+		if family.GetName() != trafficExtensionConfigConversionDuration.Name() {
+			continue
+		}
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				if label.GetName() == "extension_type" {
+					result[label.GetValue()] = metric.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+	}
+	return result
 }

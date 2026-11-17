@@ -15,14 +15,12 @@
 package model
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 
 	dynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/dynamic_modules/v3"
 	httpdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
 	networkdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/dynamic_modules/v3"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -30,19 +28,42 @@ import (
 	pm "istio.io/istio/pkg/model"
 )
 
-// BuildDynamicModuleFilter builds a standard Envoy filter with agent-only fetch options in filter_config.
-func (e *TrafficExtensionWrapper) BuildDynamicModuleFilter(pullSecret []byte) (proto.Message, error) {
+// BuildHTTPDynamicModuleFilter builds an Envoy HTTP DynamicModule filter.
+func (e *TrafficExtensionWrapper) BuildHTTPDynamicModuleFilter(pullSecret []byte) (*httpdynamic.DynamicModuleFilter, error) {
 	cfg := e.GetDynamicModule()
-	if cfg == nil {
-		return nil, fmt.Errorf("missing dynamic module config")
+	if cfg == nil || (cfg.Type != extensions.PluginType_HTTP && cfg.Type != extensions.PluginType_UNSPECIFIED_PLUGIN_TYPE) {
+		return nil, nil
 	}
+	module, filterConfig, err := e.buildDynamicModuleConfig(pullSecret)
+	if err != nil {
+		return nil, err
+	}
+	return &httpdynamic.DynamicModuleFilter{DynamicModuleConfig: module, FilterName: cfg.PluginName, FilterConfig: filterConfig}, nil
+}
+
+// BuildNetworkDynamicModuleFilter builds an Envoy network DynamicModule filter.
+func (e *TrafficExtensionWrapper) BuildNetworkDynamicModuleFilter(pullSecret []byte) (*networkdynamic.DynamicModuleNetworkFilter, error) {
+	cfg := e.GetDynamicModule()
+	if cfg == nil || cfg.Type != extensions.PluginType_NETWORK {
+		return nil, nil
+	}
+	module, filterConfig, err := e.buildDynamicModuleConfig(pullSecret)
+	if err != nil {
+		return nil, err
+	}
+	return &networkdynamic.DynamicModuleNetworkFilter{DynamicModuleConfig: module, FilterName: cfg.PluginName, FilterConfig: filterConfig}, nil
+}
+
+// buildDynamicModuleConfig wraps filter_config with agent-only fetch options for remote modules.
+func (e *TrafficExtensionWrapper) buildDynamicModuleConfig(pullSecret []byte) (*dynamic.DynamicModuleConfig, *anypb.Any, error) {
+	cfg := e.GetDynamicModule()
 	moduleURL := cfg.Url
 	if !strings.Contains(moduleURL, "://") {
 		moduleURL = "oci://" + moduleURL
 	}
 	u, err := url.Parse(moduleURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pluginConfig := cfg.PluginConfig
 	if pluginConfig == nil {
@@ -50,25 +71,18 @@ func (e *TrafficExtensionWrapper) BuildDynamicModuleFilter(pullSecret []byte) (p
 	}
 	filterConfig, err := anypb.New(pluginConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	envelope := &pm.DynamicModuleConfigEnvelope{
-		FilterConfig:       filterConfig,
-		PullSecret:         pullSecret,
-		PullSecretRequired: cfg.ImagePullSecret != "",
-		PullPolicy:         cfg.ImagePullPolicy,
-		ResourceVersion:    e.ResourceVersion,
+	source := buildDataSource(u, moduleURL, cfg.Sha256)
+	if source.GetRemote() != nil {
+		envelope := &pm.DynamicModuleConfigEnvelope{
+			FilterConfig: filterConfig, PullSecret: pullSecret, PullSecretRequired: cfg.ImagePullSecret != "",
+			PullPolicy: cfg.ImagePullPolicy, ResourceVersion: e.ResourceVersion,
+		}
+		filterConfig, err = envelope.ToAny()
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	wrappedConfig, err := envelope.ToAny()
-	if err != nil {
-		return nil, err
-	}
-	module := &dynamic.DynamicModuleConfig{
-		Module:          buildDataSource(u, moduleURL, cfg.Sha256),
-		NackOnCacheMiss: true,
-	}
-	if cfg.Type == extensions.PluginType_NETWORK {
-		return &networkdynamic.DynamicModuleNetworkFilter{DynamicModuleConfig: module, FilterName: cfg.PluginName, FilterConfig: wrappedConfig}, nil
-	}
-	return &httpdynamic.DynamicModuleFilter{DynamicModuleConfig: module, FilterName: cfg.PluginName, FilterConfig: wrappedConfig}, nil
+	return &dynamic.DynamicModuleConfig{Module: source}, filterConfig, nil
 }

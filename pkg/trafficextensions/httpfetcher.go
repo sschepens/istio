@@ -90,13 +90,13 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, url string, allowInsecure bool)
 		attempts++
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			wasmLog.Debugf("wasm module download request failed: %v", err)
+			trafficextensionLog.Debugf("wasm module download request failed: %v", err)
 			return nil, err
 		}
 		resp, err := c.Do(req)
 		if err != nil {
 			lastError = err
-			wasmLog.Debugf("wasm module download request failed: %v", err)
+			trafficextensionLog.Debugf("wasm module download request failed: %v", err)
 			if ctx.Err() != nil {
 				// If there is context timeout, exit this loop.
 				return nil, fmt.Errorf("wasm module download failed after %v attempts, last error: %v", attempts, lastError)
@@ -111,7 +111,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, url string, allowInsecure bool)
 			}
 			err = resp.Body.Close()
 			if err != nil {
-				wasmLog.Infof("wasm server connection is not closed: %v", err)
+				trafficextensionLog.Infof("wasm server connection is not closed: %v", err)
 			}
 			return unboxIfPossible(body), err
 		}
@@ -121,17 +121,17 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, url string, allowInsecure bool)
 			if err != nil {
 				return nil, err
 			}
-			wasmLog.Debugf("wasm module download failed: status code %v, body %v", resp.StatusCode, string(body))
+			trafficextensionLog.Debugf("wasm module download failed: status code %v, body %v", resp.StatusCode, string(body))
 			err = resp.Body.Close()
 			if err != nil {
-				wasmLog.Infof("wasm server connection is not closed: %v", err)
+				trafficextensionLog.Infof("wasm server connection is not closed: %v", err)
 			}
 			time.Sleep(b.NextBackOff())
 			continue
 		}
 		err = resp.Body.Close()
 		if err != nil {
-			wasmLog.Infof("wasm server connection is not closed: %v", err)
+			trafficextensionLog.Infof("wasm server connection is not closed: %v", err)
 		}
 		break
 	}

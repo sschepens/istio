@@ -39,6 +39,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 
+	"istio.io/istio/pkg/monitoring/monitortest"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -956,4 +957,41 @@ func generateModulePath(t *testing.T, baseDir, resourceName, filename string) st
 		}
 	}
 	return filepath.Join(moduleDir, filename)
+}
+
+func TestCacheMetricExtensionTypes(t *testing.T) {
+	metrics := monitortest.New(t)
+	cache := NewLocalFileCache(t.TempDir(), Options{PurgeInterval: 5 * time.Millisecond, ModuleExpiry: time.Hour})
+	defer cache.Cleanup()
+	keys := []cacheKey{
+		{moduleKey: moduleKey{name: "wasm-one", checksum: "one"}, downloadURL: "http://test/wasm-one"},
+		{moduleKey: moduleKey{name: "wasm-two", checksum: "two"}, downloadURL: "http://test/wasm-two"},
+		{moduleKey: moduleKey{name: "native", checksum: "native", dynamicModule: true}, downloadURL: "http://test/native"},
+	}
+	for _, key := range keys {
+		if _, err := cache.addEntry(key, []byte("module")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	metrics.Assert(trafficExtensionCacheEntries.Name(), map[string]string{"extension_type": wasmExtensionType}, monitortest.Exactly(2))
+	metrics.Assert(trafficExtensionCacheEntries.Name(), map[string]string{"extension_type": dynamicModuleExtensionType}, monitortest.Exactly(1))
+	for _, key := range []cacheKey{keys[0], keys[2]} {
+		if entry, _ := cache.getEntry(key, true); entry == nil {
+			t.Fatal("expected cache hit")
+		}
+		key.name = "missing"
+		if entry, _ := cache.getEntry(key, true); entry != nil {
+			t.Fatal("expected cache miss")
+		}
+	}
+	for _, extensionType := range []string{wasmExtensionType, dynamicModuleExtensionType} {
+		for _, hit := range []string{"true", "false"} {
+			metrics.Assert(trafficExtensionCacheLookupCount.Name(), map[string]string{"extension_type": extensionType, "hit": hit}, monitortest.Exactly(1))
+		}
+	}
+	cache.mux.Lock()
+	cache.modules[keys[2].moduleKey].last = time.Now().Add(-2 * time.Hour)
+	cache.mux.Unlock()
+	metrics.Assert(trafficExtensionCacheEntries.Name(), map[string]string{"extension_type": dynamicModuleExtensionType}, monitortest.Exactly(0))
+	metrics.Assert(trafficExtensionCacheEntries.Name(), map[string]string{"extension_type": wasmExtensionType}, monitortest.Exactly(2))
 }

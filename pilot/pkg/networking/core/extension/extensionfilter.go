@@ -186,12 +186,30 @@ func InsertedTrafficExtensionConfigurations(
 			continue
 		}
 		if d := filter.GetDynamicModule(); d != nil {
-			dynamicModuleFilter, err := filter.BuildDynamicModuleFilter(pullSecrets[d.ImagePullSecret])
-			if err != nil {
-				log.Warnf("cannot build DynamicModule %s: %v", filter.ResourceName, err)
-				continue
+			ec := &core.TypedExtensionConfig{Name: filter.ResourceName}
+			switch d.Type {
+			case extensions.PluginType_NETWORK:
+				dynamicModuleFilter, err := filter.BuildNetworkDynamicModuleFilter(pullSecrets[d.ImagePullSecret])
+				if err != nil {
+					log.Warnf("cannot build network DynamicModule %s: %v", filter.ResourceName, err)
+					continue
+				}
+				if dynamicModuleFilter == nil {
+					continue
+				}
+				ec.TypedConfig = protoconv.MessageToAny(dynamicModuleFilter)
+			default:
+				dynamicModuleFilter, err := filter.BuildHTTPDynamicModuleFilter(pullSecrets[d.ImagePullSecret])
+				if err != nil {
+					log.Warnf("cannot build HTTP DynamicModule %s: %v", filter.ResourceName, err)
+					continue
+				}
+				if dynamicModuleFilter == nil {
+					continue
+				}
+				ec.TypedConfig = protoconv.MessageToAny(dynamicModuleFilter)
 			}
-			result = append(result, &core.TypedExtensionConfig{Name: filter.ResourceName, TypedConfig: protoconv.MessageToAny(dynamicModuleFilter)})
+			result = append(result, ec)
 			continue
 		}
 		// Build the remaining Wasm configurations.

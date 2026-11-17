@@ -18,13 +18,16 @@ import "istio.io/istio/pkg/monitoring"
 
 // Const strings for label value.
 const (
+	wasmExtensionType          = "wasm"
+	dynamicModuleExtensionType = "dynamic_module"
+
 	// For remote fetch metric.
 	fetchSuccess     = "success"
 	downloadFailure  = "download_failure"
 	manifestFailure  = "manifest_failure"
 	checksumMismatch = "checksum_mismatched"
 
-	// For Wasm conversion metric.
+	// For extension conversion metrics.
 	conversionSuccess   = "success"
 	noRemoteLoad        = "no_remote_load"
 	marshalFailure      = "marshal_failure"
@@ -34,32 +37,40 @@ const (
 )
 
 var (
-	hitTag    = monitoring.CreateLabel("hit")
-	resultTag = monitoring.CreateLabel("result")
+	extensionTypeTag = monitoring.CreateLabel("extension_type")
+	hitTag           = monitoring.CreateLabel("hit")
+	resultTag        = monitoring.CreateLabel("result")
 
-	wasmCacheEntries = monitoring.NewGauge(
-		"wasm_cache_entries",
-		"number of Wasm remote fetch cache entries.",
+	trafficExtensionCacheEntries = monitoring.NewGauge(
+		"traffic_extension_cache_entries",
+		"number of remote traffic extension cache entries.",
 	)
 
-	wasmCacheLookupCount = monitoring.NewSum(
-		"wasm_cache_lookup_count",
-		"number of Wasm remote fetch cache lookups.",
+	trafficExtensionCacheLookupCount = monitoring.NewSum(
+		"traffic_extension_cache_lookup_count",
+		"number of remote traffic extension cache lookups.",
 	)
 
-	wasmRemoteFetchCount = monitoring.NewSum(
-		"wasm_remote_fetch_count",
-		"number of Wasm remote fetches and results, including success, download failure, and checksum mismatch.",
+	trafficExtensionRemoteFetchCount = monitoring.NewSum(
+		"traffic_extension_remote_fetch_count",
+		"number of remote traffic extension fetches and results, including success, download failure, and checksum mismatch.",
 	)
 
-	wasmConfigConversionCount = monitoring.NewSum(
-		"wasm_config_conversion_count",
-		"number of Wasm config conversions and results, including success, no remote load, marshal failure, remote fetch failure, miss remote fetch hint.",
+	trafficExtensionConfigConversionCount = monitoring.NewSum(
+		"traffic_extension_config_conversion_count",
+		"number of Wasm and DynamicModule config conversions and results, including success, no remote load, unmarshal failure, marshal failure, remote fetch failure, and missing remote fetch hints.",
 	)
 
-	wasmConfigConversionDuration = monitoring.NewDistribution(
-		"wasm_config_conversion_duration",
-		"Total time in milliseconds istio-agent spends on converting remote load in Wasm config.",
+	trafficExtensionConfigConversionDuration = monitoring.NewDistribution(
+		"traffic_extension_config_conversion_duration",
+		"Time in milliseconds istio-agent spends converting each traffic extension config.",
 		[]float64{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384},
 	)
 )
+
+func extensionTypeForModule(dynamicModule bool) string {
+	if dynamicModule {
+		return dynamicModuleExtensionType
+	}
+	return wasmExtensionType
+}

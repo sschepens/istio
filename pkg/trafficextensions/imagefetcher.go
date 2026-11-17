@@ -218,7 +218,7 @@ func (o *ImageFetcher) PrepareFetch(url string) (binaryFetcher func() ([]byte, e
 		err = fmt.Errorf("could not parse url in image reference: %v", err)
 		return binaryFetcher, actualDigest, err
 	}
-	wasmLog.Infof("fetching image %s from registry %s with tag %s", ref.Context().RepositoryStr(),
+	trafficextensionLog.Infof("fetching image %s from registry %s with tag %s", ref.Context().RepositoryStr(),
 		ref.Context().RegistryStr(), ref.Identifier())
 
 	// Fallback to a plaintext HTTP request, inspired by helm's registry client
@@ -227,7 +227,7 @@ func (o *ImageFetcher) PrepareFetch(url string) (binaryFetcher func() ([]byte, e
 	// already allowlisted as insecure, never on the base of the registry's response alone.
 	desc, err := remote.Get(ref, o.fetchOpts...)
 	if shouldRetryPlaintext(o.allowInsecureHTTPDowngrade, err) {
-		wasmLog.Infof("fetching image with plain text from %s", url)
+		trafficextensionLog.Infof("fetching image with plain text from %s", url)
 		ref, err = name.ParseReference(url, name.Insecure)
 		if err == nil {
 			desc, err = remote.Get(ref, o.fetchOpts...)

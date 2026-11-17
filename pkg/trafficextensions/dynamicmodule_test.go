@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	dynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/dynamic_modules/v3"
 	httpdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
@@ -48,6 +49,7 @@ import (
 
 	extensions "istio.io/api/extensions/v1alpha1"
 	"istio.io/istio/pkg/model"
+	"istio.io/istio/pkg/monitoring/monitortest"
 )
 
 func TestDynamicModulePlatform(t *testing.T) {
@@ -185,10 +187,12 @@ func TestDynamicModuleConversion(t *testing.T) {
 			}}}
 			resource := dynamicModuleResource(t, typ == "NETWORK", source, envelope)
 			cache := &dynamicModuleCache{}
+			metrics := monitortest.New(t)
 			resources := []*anypb.Any{resource}
 			if err := MaybeConvertExtensionConfig(resources, cache); err != nil {
 				t.Fatal(err)
 			}
+			metrics.Assert(trafficExtensionConfigConversionCount.Name(), map[string]string{"result": conversionSuccess, "extension_type": dynamicModuleExtensionType}, monitortest.Exactly(1))
 			if cache.url != "oci://registry/module:v1" || !cache.opts.DynamicModule || cache.opts.ResourceVersion != "42" || cache.opts.PullPolicy != Always || string(cache.opts.PullSecret) != "secret" {
 				t.Fatalf("bad options: %+v", cache)
 			}
@@ -231,11 +235,14 @@ func TestDynamicModuleConversion(t *testing.T) {
 					t.Fatal(f)
 				}
 			}
+			metrics = monitortest.New(t)
 			cache.err = errors.New("no matching architecture")
 			resources = []*anypb.Any{resource}
 			if err := MaybeConvertExtensionConfig(resources, cache); err == nil || !strings.Contains(err.Error(), "no matching architecture") {
 				t.Fatalf("expected NACK: %v", err)
 			}
+			metrics.Assert(trafficExtensionConfigConversionCount.Name(), map[string]string{"result": fetchFailure, "extension_type": dynamicModuleExtensionType}, monitortest.Exactly(1))
+			metrics.Assert(trafficExtensionConfigConversionCount.Name(), map[string]string{"result": conversionSuccess, "extension_type": dynamicModuleExtensionType}, monitortest.Exactly(0))
 		})
 	}
 }
@@ -276,18 +283,26 @@ func TestDynamicModuleLocalAndMissingSecret(t *testing.T) {
 		} else {
 			source = &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{Local: &core.DataSource{Specifier: &core.DataSource_Filename{Filename: "/opt/filters/module.so"}}}}
 		}
-		resource := dynamicModuleResource(t, false, source, envelope)
+		wrappedConfig := filterConfig
+		if tc.secret {
+			wrappedConfig = envelope
+		}
+		resource := dynamicModuleResource(t, false, source, wrappedConfig)
 		cache := &dynamicModuleCache{}
-		converted, handled, err := convertDynamicModule(resource, cache)
-		if !handled || (err != nil) != tc.wantErr {
-			t.Fatalf("handled=%v err=%v", handled, err)
+		resources := []*anypb.Any{resource}
+		err = MaybeConvertExtensionConfig(resources, cache)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("err=%v", err)
 		}
 		if cache.url != "" {
 			t.Fatal("unexpected fetch")
 		}
+		if !tc.secret && !proto.Equal(resources[0], resource) {
+			t.Fatal("local filter modified by agent")
+		}
 		if err == nil {
 			ec := &core.TypedExtensionConfig{}
-			if err := converted.UnmarshalTo(ec); err != nil {
+			if err := resources[0].UnmarshalTo(ec); err != nil {
 				t.Fatal(err)
 			}
 			f := &httpdynamic.DynamicModuleFilter{}
@@ -318,6 +333,7 @@ func TestDynamicModuleHTTPCache(t *testing.T) {
 	digest := sha256.Sum256(b)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(b) }))
 	defer server.Close()
+	metrics := monitortest.New(t)
 	cache := NewLocalFileCache(t.TempDir(), defaultOptions())
 	defer cache.Cleanup()
 	opts := GetOptions{DynamicModule: true, Checksum: hex.EncodeToString(digest[:]), RequestTimeout: time.Second}
@@ -350,6 +366,10 @@ func TestDynamicModuleHTTPCache(t *testing.T) {
 	if isValidDynamicModule(b) {
 		t.Fatal("accepted foreign architecture ELF")
 	}
+	metrics.Assert(trafficExtensionRemoteFetchCount.Name(), map[string]string{"extension_type": dynamicModuleExtensionType, "result": fetchSuccess}, monitortest.Exactly(1))
+	metrics.Assert(trafficExtensionRemoteFetchCount.Name(), map[string]string{"extension_type": dynamicModuleExtensionType, "result": checksumMismatch}, monitortest.Exactly(1))
+	metrics.Assert(trafficExtensionRemoteFetchCount.Name(), map[string]string{"extension_type": wasmExtensionType, "result": fetchFailure}, monitortest.Exactly(1))
+
 }
 
 func dynamicModuleResource(t *testing.T, network bool, source *core.AsyncDataSource, filterConfig *anypb.Any) *anypb.Any {
@@ -371,19 +391,76 @@ func dynamicModuleResource(t *testing.T, network bool, source *core.AsyncDataSou
 }
 
 func TestDynamicModuleWithoutEnvelope(t *testing.T) {
-	config, err := anypb.New(&structpb.Struct{})
+	pluginConfig, err := anypb.New(&structpb.Struct{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Even a payload shaped exactly like our envelope belongs to the plugin
+	// when its TypedStruct uses a different type URL.
+	envelope, err := (&model.DynamicModuleConfigEnvelope{
+		FilterConfig: pluginConfig, PullSecret: []byte("credentials"), ResourceVersion: "42",
+	}).ToAny()
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom := &udpa.TypedStruct{}
+	if err := envelope.UnmarshalTo(custom); err != nil {
+		t.Fatal(err)
+	}
+	custom.TypeUrl = "type.googleapis.com/example.CustomFilterConfig"
+	customConfig, err := anypb.New(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainConfig, err := anypb.New(custom.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		config *anypb.Any
+	}{
+		{name: "nil"},
+		{name: "plain struct", config: plainConfig},
+		{name: "custom TypedStruct", config: customConfig},
+		{name: "custom Any", config: &anypb.Any{TypeUrl: custom.TypeUrl, Value: []byte("custom plugin config")}},
+	} {
+		for _, network := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/network=%t", tc.name, network), func(t *testing.T) {
+				source := &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{
+					HttpUri: &core.HttpUri{Uri: "oci://registry/module:v1"},
+				}}}
+				resource := dynamicModuleResource(t, network, source, tc.config)
+				resources := []*anypb.Any{resource}
+				cache := &dynamicModuleCache{}
+				if err := MaybeConvertExtensionConfig(resources, cache); err != nil {
+					t.Fatal(err)
+				}
+				if !proto.Equal(resources[0], resource) || cache.url != "" {
+					t.Fatal("custom EnvoyFilter config was modified or fetched by the agent")
+				}
+			})
+		}
+	}
+}
+
+func TestDynamicModuleMalformedEnvelope(t *testing.T) {
+	envelope, err := anypb.New(&udpa.TypedStruct{TypeUrl: model.DynamicModuleTransportType})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{
+		HttpUri: &core.HttpUri{Uri: "oci://registry/module:v1"},
+	}}}
 	for _, network := range []bool{false, true} {
-		resource := dynamicModuleResource(t, network, nil, config)
+		resource := dynamicModuleResource(t, network, source, envelope)
 		resources := []*anypb.Any{resource}
 		cache := &dynamicModuleCache{}
-		if err := MaybeConvertExtensionConfig(resources, cache); err != nil {
-			t.Fatal(err)
+		if err := MaybeConvertExtensionConfig(resources, cache); err == nil {
+			t.Fatal("accepted malformed Istio envelope")
 		}
 		if !proto.Equal(resources[0], resource) || cache.url != "" {
-			t.Fatal("unwrapped filter was modified")
+			t.Fatal("invalid envelope was modified or fetched")
 		}
 	}
 }
@@ -397,15 +474,107 @@ func TestDynamicModuleMissingSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, source := range []*core.AsyncDataSource{
-		nil,
-		{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{}}},
-		{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{HttpUri: &core.HttpUri{}}}},
-		{Specifier: &core.AsyncDataSource_Local{Local: &core.DataSource{}}},
+	for _, tc := range []struct {
+		name       string
+		source     *core.AsyncDataSource
+		parseError bool
+	}{
+		{name: "missing source", parseError: true},
+		{name: "missing URI", source: &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{}}}},
+		{name: "empty URI", source: &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{HttpUri: &core.HttpUri{}}}}},
 	} {
-		resource := dynamicModuleResource(t, false, source, envelope)
-		if _, handled, err := convertDynamicModule(resource, &dynamicModuleCache{}); !handled || err == nil {
-			t.Fatalf("expected invalid-source error, got handled=%v, err=%v", handled, err)
+		t.Run(tc.name, func(t *testing.T) {
+			for _, network := range []bool{false, true} {
+				resource := dynamicModuleResource(t, network, tc.source, envelope)
+				if _, _, err := tryUnmarshal(resource); (err != nil) != tc.parseError {
+					t.Fatalf("expected parse error=%v, got %v", tc.parseError, err)
+				}
+				if err := MaybeConvertExtensionConfig([]*anypb.Any{resource}, &dynamicModuleCache{}); err == nil {
+					t.Fatal("expected invalid-source error")
+				}
+			}
+		})
+	}
+}
+
+func TestTryUnmarshalDynamicModulePreservesEnvelope(t *testing.T) {
+	pluginConfig, err := anypb.New(&structpb.Struct{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := (&model.DynamicModuleConfigEnvelope{
+		FilterConfig: pluginConfig, PullSecret: []byte("credentials"), PullSecretRequired: true,
+		PullPolicy: extensions.PullPolicy_Always, ResourceVersion: "42",
+	}).ToAny()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{
+		Remote: &core.RemoteDataSource{HttpUri: &core.HttpUri{Uri: "oci://registry/module:v1"}},
+	}}
+	for _, network := range []bool{false, true} {
+		resource := dynamicModuleResource(t, network, source, envelope)
+		parsed, _, err := tryUnmarshal(resource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if parsed == nil {
+			t.Fatal("missing parsed filter")
+		}
+		var filterConfig *anypb.Any
+		var module *dynamic.DynamicModuleConfig
+		switch filter := parsed.filter.(type) {
+		case *httpdynamic.DynamicModuleFilter:
+			filterConfig, module = filter.FilterConfig, filter.DynamicModuleConfig
+		case *networkdynamic.DynamicModuleNetworkFilter:
+			filterConfig, module = filter.FilterConfig, filter.DynamicModuleConfig
+		default:
+			t.Fatalf("unexpected filter %T", parsed.filter)
+		}
+		if !proto.Equal(filterConfig, envelope) {
+			t.Fatal("parser changed the download envelope")
+		}
+		options, err := model.UnmarshalDynamicModuleConfigEnvelope(filterConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if options == nil || string(options.PullSecret) != "credentials" || !options.PullSecretRequired || options.PullPolicy != extensions.PullPolicy_Always || options.ResourceVersion != "42" {
+			t.Fatal("parser did not preserve download options")
+		}
+		// Parsing must preserve the rest of the Envoy config and leave the original resource untouched.
+		if module.MetricsNamespace != "test" || !module.DoNotClose {
+			t.Fatal("module options changed")
+		}
+		original := &core.TypedExtensionConfig{}
+		if err := resource.UnmarshalTo(original); err != nil {
+			t.Fatal(err)
+		}
+		if !proto.Equal(original.TypedConfig, parsed.config.TypedConfig) {
+			t.Fatal("original wire config was modified")
+		}
+	}
+}
+
+// As with Wasm, a local source bypasses agent conversion; Envoy validates its contents.
+func TestDynamicModuleLocalSourcePassThrough(t *testing.T) {
+	config, err := anypb.New(&structpb.Struct{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{Local: &core.DataSource{}}}
+	for _, network := range []bool{false, true} {
+		resource := dynamicModuleResource(t, network, source, config)
+		resources := []*anypb.Any{resource}
+		cache := &dynamicModuleCache{}
+		parsed, _, err := tryUnmarshal(resource)
+		if err != nil || parsed != nil {
+			t.Fatalf("local filter should bypass conversion: %v", err)
+		}
+		if err := MaybeConvertExtensionConfig(resources, cache); err != nil {
+			t.Fatal(err)
+		}
+		if !proto.Equal(resources[0], resource) || cache.url != "" {
+			t.Fatal("local filter was modified or fetched")
 		}
 	}
 }

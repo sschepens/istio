@@ -36,7 +36,7 @@ import (
 	"istio.io/istio/pkg/util/sets"
 )
 
-var wasmLog = log.RegisterScope("wasm", "")
+var trafficextensionLog = log.RegisterScope("trafficextension", "")
 
 const (
 	// oci URL prefix
@@ -146,7 +146,7 @@ func (o cacheOptions) allowInsecure(host string) bool {
 
 // NewLocalFileCache creates a cache that downloads and stores extension binaries locally.
 func NewLocalFileCache(dir string, options Options) *LocalFileCache {
-	wasmLog.Debugf("LocalFileCache is created with the option\n%#v", options)
+	trafficextensionLog.Debugf("LocalFileCache is created with the option\n%#v", options)
 
 	cacheOptions := cacheOptions{Options: options}
 	cache := &LocalFileCache{
@@ -245,7 +245,7 @@ func (c *LocalFileCache) getOrFetch(key cacheKey, opts GetOptions) (*cacheEntry,
 		// Download the Wasm module with http fetcher.
 		b, err = c.httpFetcher.Fetch(ctx, key.downloadURL, insecure)
 		if err != nil {
-			wasmRemoteFetchCount.With(resultTag.Value(downloadFailure)).Increment()
+			trafficExtensionRemoteFetchCount.With(extensionTypeTag.Value(extensionTypeForModule(opts.DynamicModule)), resultTag.Value(downloadFailure)).Increment()
 			return nil, err
 		}
 
@@ -260,11 +260,11 @@ func (c *LocalFileCache) getOrFetch(key cacheKey, opts GetOptions) (*cacheEntry,
 		if opts.PullSecret != nil {
 			imgFetcherOps.PullSecret = opts.PullSecret
 		}
-		wasmLog.Debugf("fetching oci image from %s with options: %v", key.downloadURL, imgFetcherOps)
+		trafficextensionLog.Debugf("fetching oci image from %s with options: %v", key.downloadURL, imgFetcherOps)
 		fetcher := NewImageFetcher(ctx, imgFetcherOps)
 		binaryFetcher, dChecksum, err = fetcher.PrepareFetch(u.Host + u.Path)
 		if err != nil {
-			wasmRemoteFetchCount.With(resultTag.Value(manifestFailure)).Increment()
+			trafficExtensionRemoteFetchCount.With(extensionTypeTag.Value(extensionTypeForModule(opts.DynamicModule)), resultTag.Value(manifestFailure)).Increment()
 			return nil, fmt.Errorf("could not fetch Wasm OCI image: %v", err)
 		}
 	default:
@@ -278,27 +278,27 @@ func (c *LocalFileCache) getOrFetch(key cacheKey, opts GetOptions) (*cacheEntry,
 			return ce, nil
 		}
 	} else if dChecksum != key.checksum {
-		wasmRemoteFetchCount.With(resultTag.Value(checksumMismatch)).Increment()
+		trafficExtensionRemoteFetchCount.With(extensionTypeTag.Value(extensionTypeForModule(opts.DynamicModule)), resultTag.Value(checksumMismatch)).Increment()
 		return nil, fmt.Errorf("module downloaded from %v has checksum %v, which does not match: %v", key.downloadURL, dChecksum, key.checksum)
 	}
 
 	if binaryFetcher != nil {
 		b, err = binaryFetcher()
 		if err != nil {
-			wasmRemoteFetchCount.With(resultTag.Value(downloadFailure)).Increment()
+			trafficExtensionRemoteFetchCount.With(extensionTypeTag.Value(extensionTypeForModule(opts.DynamicModule)), resultTag.Value(downloadFailure)).Increment()
 			return nil, fmt.Errorf("could not fetch Wasm binary: %v", err)
 		}
 	}
 
 	if (!opts.DynamicModule && !isValidWasmBinary(b)) || (opts.DynamicModule && !isValidDynamicModule(b)) {
-		wasmRemoteFetchCount.With(resultTag.Value(fetchFailure)).Increment()
+		trafficExtensionRemoteFetchCount.With(extensionTypeTag.Value(extensionTypeForModule(opts.DynamicModule)), resultTag.Value(fetchFailure)).Increment()
 		if opts.DynamicModule {
 			return nil, fmt.Errorf("fetched DynamicModule binary from %s is not a shared library for linux/%s", key.downloadURL, runtime.GOARCH)
 		}
 		return nil, fmt.Errorf("fetched Wasm binary from %s is invalid", key.downloadURL)
 	}
 
-	wasmRemoteFetchCount.With(resultTag.Value(fetchSuccess)).Increment()
+	trafficExtensionRemoteFetchCount.With(extensionTypeTag.Value(extensionTypeForModule(opts.DynamicModule)), resultTag.Value(fetchSuccess)).Increment()
 
 	key.checksum = dChecksum
 	return c.addEntry(key, b)
@@ -360,7 +360,7 @@ func (c *LocalFileCache) addEntry(key cacheKey, wasmModule []byte) (*cacheEntry,
 		ce.referencingURLs.Insert(key.checksumURL())
 	}
 	c.modules[key.moduleKey] = &ce
-	wasmCacheEntries.Record(float64(len(c.modules)))
+	c.recordCacheEntries()
 	return &ce, nil
 }
 
@@ -371,7 +371,7 @@ func (c *LocalFileCache) getEntry(key cacheKey, ignoreResourceVersion bool) (*ca
 	c.mux.Lock()
 	defer func() {
 		c.mux.Unlock()
-		wasmCacheLookupCount.With(hitTag.Value(strconv.FormatBool(cacheHit))).Increment()
+		trafficExtensionCacheLookupCount.With(extensionTypeTag.Value(extensionTypeForModule(key.dynamicModule)), hitTag.Value(strconv.FormatBool(cacheHit))).Increment()
 	}()
 
 	if len(key.checksum) == 0 && strings.HasPrefix(key.downloadURL, ociURLPrefix) {
@@ -422,16 +422,16 @@ func (c *LocalFileCache) purge() {
 				}
 				// The module has not be touched for expiry duration, delete it from the map as well as the local dir.
 				if err := os.Remove(m.modulePath); err != nil {
-					wasmLog.Errorf("failed to purge Wasm module %v: %v", m.modulePath, err)
+					trafficextensionLog.Errorf("failed to purge Wasm module %v: %v", m.modulePath, err)
 				} else {
 					for downloadURL := range m.referencingURLs {
 						delete(c.checksums, downloadURL)
 					}
 					delete(c.modules, k)
-					wasmLog.Debugf("successfully removed stale Wasm module %v", m.modulePath)
+					trafficextensionLog.Debugf("successfully removed stale Wasm module %v", m.modulePath)
 				}
 			}
-			wasmCacheEntries.Record(float64(len(c.modules)))
+			c.recordCacheEntries()
 			c.mux.Unlock()
 		case <-c.stopChan:
 			// Currently this will only happen in test.
@@ -474,8 +474,10 @@ func isValidDynamicModule(b []byte) bool {
 		return false
 	}
 	defer f.Close()
-	machines := map[string]elf.Machine{"amd64": elf.EM_X86_64, "arm64": elf.EM_AARCH64, "arm": elf.EM_ARM,
-		"ppc64le": elf.EM_PPC64, "s390x": elf.EM_S390, "riscv64": elf.EM_RISCV}
+	machines := map[string]elf.Machine{
+		"amd64": elf.EM_X86_64, "arm64": elf.EM_AARCH64, "arm": elf.EM_ARM,
+		"ppc64le": elf.EM_PPC64, "s390x": elf.EM_S390, "riscv64": elf.EM_RISCV,
+	}
 	machine, ok := machines[runtime.GOARCH]
 	class := elf.ELFCLASS64
 	if runtime.GOARCH == "arm" {
@@ -486,4 +488,18 @@ func isValidDynamicModule(b []byte) bool {
 		data = elf.ELFDATA2MSB
 	}
 	return ok && f.Type == elf.ET_DYN && f.Machine == machine && f.Class == class && f.Data == data
+}
+
+// recordCacheEntries records separate counts for each extension type. The caller holds c.mux.
+func (c *LocalFileCache) recordCacheEntries() {
+	wasm, dynamicModule := 0, 0
+	for key := range c.modules {
+		if key.dynamicModule {
+			dynamicModule++
+		} else {
+			wasm++
+		}
+	}
+	trafficExtensionCacheEntries.With(extensionTypeTag.Value(wasmExtensionType)).Record(float64(wasm))
+	trafficExtensionCacheEntries.With(extensionTypeTag.Value(dynamicModuleExtensionType)).Record(float64(dynamicModule))
 }

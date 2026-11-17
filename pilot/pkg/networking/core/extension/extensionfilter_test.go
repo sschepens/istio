@@ -25,6 +25,7 @@ import (
 	networkdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/dynamic_modules/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	extensions "istio.io/api/extensions/v1alpha1"
@@ -903,12 +904,16 @@ func TestMixedWasmLuaPriorityOrdering_PreservesSortedOrder(t *testing.T) {
 }
 
 func TestDynamicModuleECDS(t *testing.T) {
+	pluginConfig, err := structpb.NewStruct(map[string]any{"key": "value"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, typ := range []extensions.PluginType{extensions.PluginType_UNSPECIFIED_PLUGIN_TYPE, extensions.PluginType_HTTP, extensions.PluginType_NETWORK} {
 		for _, moduleURL := range []string{"oci://registry/native:v1", "registry:5000/native:v1", "file:///opt/filters/native.so"} {
 			t.Run(typ.String()+"/"+moduleURL, func(t *testing.T) {
 				filter := &model.TrafficExtensionWrapper{ResourceName: "native", ResourceVersion: "42", TrafficExtension: &extensions.TrafficExtension{
 					FilterConfig: &extensions.TrafficExtension_DynamicModule{DynamicModule: &extensions.DynamicModuleConfig{
-						Url: moduleURL, Sha256: "checksum", ImagePullSecret: "kubernetes://ns/pull", Type: typ,
+						Url: moduleURL, Sha256: "checksum", ImagePullSecret: "kubernetes://ns/pull", Type: typ, PluginConfig: pluginConfig,
 					}},
 				}}
 				http := toEnvoyHTTPTrafficExtension(filter)
@@ -947,6 +952,13 @@ func TestDynamicModuleECDS(t *testing.T) {
 				envelope, err := pm.UnmarshalDynamicModuleConfigEnvelope(wrappedConfig)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if strings.HasPrefix(moduleURL, "file://") {
+					if envelope != nil {
+						t.Fatal("local module has a download envelope")
+					}
+					assert.Equal(t, wrappedConfig, protoconv.MessageToAny(pluginConfig))
+					return
 				}
 				if envelope == nil {
 					t.Fatal("missing DynamicModule envelope")

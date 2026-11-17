@@ -28,69 +28,75 @@ import (
 	"istio.io/istio/pkg/model"
 )
 
-// convertDynamicModule unwraps agent-only fetch options from a standard Envoy filter.
+// convertDynamicModuleFromRemoteToLocal unwraps fetch options and downloads the library for a remote Envoy filter.
+// A nil result leaves filters without an agent envelope unchanged.
 // Download failures NACK ECDS, preventing Envoy's remote-module fail-open behavior.
-func convertDynamicModule(resource *anypb.Any, cache Cache) (*anypb.Any, bool, error) {
-	ec := &core.TypedExtensionConfig{}
-	if err := resource.UnmarshalTo(ec); err != nil {
-		return nil, false, nil
-	}
-	var filter proto.Message
+func convertDynamicModuleFromRemoteToLocal(ec *core.TypedExtensionConfig, filter proto.Message, cache Cache) (*anypb.Any, error) {
+	status := conversionSuccess
+	defer func() {
+		trafficExtensionConfigConversionCount.With(extensionTypeTag.Value(dynamicModuleExtensionType), resultTag.Value(status)).Increment()
+	}()
+
 	var module *dynamic.DynamicModuleConfig
-	var filterConfig **anypb.Any
-	switch ec.GetTypedConfig().GetTypeUrl() {
-	case model.DynamicModuleHTTPFilterType:
-		cfg := &httpdynamic.DynamicModuleFilter{}
-		if err := ec.TypedConfig.UnmarshalTo(cfg); err != nil {
-			return nil, true, err
-		}
-		filter, module, filterConfig = cfg, cfg.DynamicModuleConfig, &cfg.FilterConfig
-	case model.DynamicModuleNetworkFilterType:
-		cfg := &networkdynamic.DynamicModuleNetworkFilter{}
-		if err := ec.TypedConfig.UnmarshalTo(cfg); err != nil {
-			return nil, true, err
-		}
-		filter, module, filterConfig = cfg, cfg.DynamicModuleConfig, &cfg.FilterConfig
+	var filterConfig *anypb.Any
+	switch cfg := filter.(type) {
+	case *httpdynamic.DynamicModuleFilter:
+		module, filterConfig = cfg.DynamicModuleConfig, cfg.FilterConfig
+	case *networkdynamic.DynamicModuleNetworkFilter:
+		module, filterConfig = cfg.DynamicModuleConfig, cfg.FilterConfig
 	default:
-		return nil, false, nil
+		status = unmarshalFailure
+		return nil, fmt.Errorf("unsupported DynamicModule filter %T", filter)
 	}
-	envelope, err := model.UnmarshalDynamicModuleConfigEnvelope(*filterConfig)
+	envelope, err := model.UnmarshalDynamicModuleConfigEnvelope(filterConfig)
 	if err != nil {
-		return nil, true, err
+		status = unmarshalFailure
+		return nil, err
 	}
 	if envelope == nil {
-		return nil, false, nil
+		status = noRemoteLoad
+		return nil, nil
 	}
-	source := module.GetModule()
-	if remote := source.GetRemote(); remote != nil {
-		uri := remote.GetHttpUri()
-		if uri == nil || uri.Uri == "" {
-			return nil, true, fmt.Errorf("missing dynamic module remote URI")
-		}
-		if envelope.PullSecretRequired && len(envelope.PullSecret) == 0 {
-			return nil, true, fmt.Errorf("missing dynamic module image pull secret")
-		}
-		timeout := 30 * time.Second
-		if uri.Timeout != nil {
-			timeout = uri.Timeout.AsDuration()
-		}
-		path, err := cache.Get(uri.Uri, GetOptions{DynamicModule: true, Checksum: remote.Sha256,
-			ResourceName: ec.Name, ResourceVersion: envelope.ResourceVersion, RequestTimeout: timeout,
-			PullSecret: envelope.PullSecret, PullPolicy: PullPolicy(envelope.PullPolicy)})
-		if err != nil {
-			return nil, true, fmt.Errorf("cannot fetch dynamic module %s: %w", uri.Uri, err)
-		}
-		module.Module = &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{
-			Local: &core.DataSource{Specifier: &core.DataSource_Filename{Filename: path}},
-		}}
-	} else if source.GetLocal().GetFilename() == "" {
-		return nil, true, fmt.Errorf("missing dynamic module source")
+	remote := module.GetModule().GetRemote()
+	uri := remote.GetHttpUri()
+	if uri == nil || uri.Uri == "" {
+		status = missRemoteFetchHint
+		return nil, fmt.Errorf("missing dynamic module remote URI")
 	}
-	*filterConfig = envelope.FilterConfig
-	ec.TypedConfig, err = anypb.New(filter)
+	if envelope.PullSecretRequired && len(envelope.PullSecret) == 0 {
+		status = fetchFailure
+		return nil, fmt.Errorf("missing dynamic module image pull secret")
+	}
+	timeout := 30 * time.Second
+	if uri.Timeout != nil {
+		timeout = uri.Timeout.AsDuration()
+	}
+	path, err := cache.Get(uri.Uri, GetOptions{DynamicModule: true, Checksum: remote.Sha256,
+		ResourceName: ec.Name, ResourceVersion: envelope.ResourceVersion, RequestTimeout: timeout,
+		PullSecret: envelope.PullSecret, PullPolicy: PullPolicy(envelope.PullPolicy)})
 	if err != nil {
-		return nil, true, err
+		status = fetchFailure
+		return nil, fmt.Errorf("cannot fetch dynamic module %s: %w", uri.Uri, err)
 	}
+	module.Module = &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{
+		Local: &core.DataSource{Specifier: &core.DataSource_Filename{Filename: path}},
+	}}
+
+	switch cfg := filter.(type) {
+	case *httpdynamic.DynamicModuleFilter:
+		cfg.FilterConfig = envelope.FilterConfig
+	case *networkdynamic.DynamicModuleNetworkFilter:
+		cfg.FilterConfig = envelope.FilterConfig
+	}
+	typedConfig, err := anypb.New(filter)
+	if err != nil {
+		status = marshalFailure
+		return nil, err
+	}
+	ec.TypedConfig = typedConfig
 	result, err := anypb.New(ec)
-	return result, true, err
+	if err != nil {
+		status = marshalFailure
+	}
+	return result, err
 }
