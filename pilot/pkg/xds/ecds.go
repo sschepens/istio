@@ -166,11 +166,11 @@ func referencedSecrets(proxy *model.Proxy, push *model.PushContext, watched sets
 	trafficExtensions := push.TrafficExtensions(proxy)
 	for _, efs := range trafficExtensions {
 		for _, ef := range efs {
-			if watched.Contains(ef.ResourceName) && ef.GetDynamicModule() != nil && ef.GetDynamicModule().ImagePullSecret != "" {
-				referencedSecrets.Insert(ef.GetDynamicModule().ImagePullSecret)
-			}
 			if watched.Contains(ef.ResourceName) && ef.GetWasm() != nil && ef.GetWasm().ImagePullSecret != "" {
 				referencedSecrets.Insert(ef.GetWasm().ImagePullSecret)
+			}
+			if watched.Contains(ef.ResourceName) && ef.GetDynamicModule() != nil && ef.GetDynamicModule().ImagePullSecret != "" {
+				referencedSecrets.Insert(ef.GetDynamicModule().ImagePullSecret)
 			}
 		}
 	}

@@ -111,10 +111,6 @@ func toEnvoyHTTPTrafficExtension(filter *model.TrafficExtensionWrapper) *hcm.Htt
 				TypedConfig: protoconv.MessageToAny(luaConfig),
 			},
 		}
-	} else if filter.GetDynamicModule() != nil {
-		return &hcm.HttpFilter{Name: filter.ResourceName, ConfigType: &hcm.HttpFilter_ConfigDiscovery{ConfigDiscovery: &core.ExtensionConfigSource{
-			ConfigSource: defaultConfigSource, TypeUrls: []string{pm.DynamicModuleHTTPFilterType},
-		}}}
 	} else if filter.GetWasm() != nil {
 		// WASM filters use ECDS
 		return &hcm.HttpFilter{
@@ -129,6 +125,10 @@ func toEnvoyHTTPTrafficExtension(filter *model.TrafficExtensionWrapper) *hcm.Htt
 				},
 			},
 		}
+	} else if filter.GetDynamicModule() != nil {
+		return &hcm.HttpFilter{Name: filter.ResourceName, ConfigType: &hcm.HttpFilter_ConfigDiscovery{ConfigDiscovery: &core.ExtensionConfigSource{
+			ConfigSource: defaultConfigSource, TypeUrls: []string{pm.DynamicModuleHTTPFilterType},
+		}}}
 	}
 	log.Warnf("unknown filter type for TrafficExtension %s", filter.ResourceName)
 	return nil
@@ -146,10 +146,6 @@ func toEnvoyNetworkTrafficExtension(filter *model.TrafficExtensionWrapper) *list
 		// Lua filters do not support network (L4) filtering
 		log.Warnf("Lua filters do not support network filtering, skipping TrafficExtension %s", filter.ResourceName)
 		return nil
-	} else if filter.GetDynamicModule() != nil {
-		return &listener.Filter{Name: filter.ResourceName, ConfigType: &listener.Filter_ConfigDiscovery{ConfigDiscovery: &core.ExtensionConfigSource{
-			ConfigSource: defaultConfigSource, TypeUrls: []string{pm.DynamicModuleNetworkFilterType},
-		}}}
 	} else if filter.GetWasm() != nil {
 		// WASM filters use ECDS
 		return &listener.Filter{
@@ -164,6 +160,10 @@ func toEnvoyNetworkTrafficExtension(filter *model.TrafficExtensionWrapper) *list
 				},
 			},
 		}
+	} else if filter.GetDynamicModule() != nil {
+		return &listener.Filter{Name: filter.ResourceName, ConfigType: &listener.Filter_ConfigDiscovery{ConfigDiscovery: &core.ExtensionConfigSource{
+			ConfigSource: defaultConfigSource, TypeUrls: []string{pm.DynamicModuleNetworkFilterType},
+		}}}
 	}
 	log.Warnf("unknown filter type for TrafficExtension %s", filter.ResourceName)
 	return nil
