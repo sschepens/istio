@@ -680,3 +680,28 @@ func TestMatchListener(t *testing.T) {
 		})
 	}
 }
+
+func TestDynamicModuleWrapper(t *testing.T) {
+	for _, typ := range []extensions.PluginType{extensions.PluginType_HTTP, extensions.PluginType_NETWORK} {
+		cfg := config.Config{Meta: config.Meta{Name: "native", Namespace: "ns"}, Spec: &extensions.TrafficExtension{
+			FilterConfig: &extensions.TrafficExtension_DynamicModule{DynamicModule: &extensions.DynamicModuleConfig{Url: "oci://registry/native:v1", ImagePullSecret: "pull", Type: typ}},
+		}}
+		wrapper := convertToTrafficExtensionWrapper(cfg)
+		if wrapper == nil {
+			t.Fatal("missing wrapper")
+		}
+		if wrapper.GetDynamicModule().ImagePullSecret != "kubernetes://ns/pull" {
+			t.Fatal(wrapper.GetDynamicModule())
+		}
+		expected := FilterChainTypeHTTP
+		if typ == extensions.PluginType_NETWORK {
+			expected = FilterChainTypeNetwork
+		}
+		if !wrapper.MatchType(expected) || !wrapper.MatchType(FilterChainTypeAny) {
+			t.Fatal("wrong chain selection")
+		}
+		if wrapper.MatchType(FilterChainTypeHTTP) == wrapper.MatchType(FilterChainTypeNetwork) {
+			t.Fatal("matched both chains")
+		}
+	}
+}

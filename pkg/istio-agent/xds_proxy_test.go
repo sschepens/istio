@@ -54,7 +54,7 @@ import (
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/env"
 	"istio.io/istio/pkg/test/util/retry"
-	wasmcache "istio.io/istio/pkg/wasm"
+	"istio.io/istio/pkg/trafficextensions"
 )
 
 // Validates basic xds proxy flow by proxying one CDS requests end to end.
@@ -419,14 +419,14 @@ func TestXdsProxyReconnects(t *testing.T) {
 
 type fakeAckCache struct{}
 
-func (f *fakeAckCache) Get(string, wasmcache.GetOptions) (string, error) {
+func (f *fakeAckCache) Get(string, trafficextensions.GetOptions) (string, error) {
 	return "test", nil
 }
 func (f *fakeAckCache) Cleanup() {}
 
 type fakeNackCache struct{}
 
-func (f *fakeNackCache) Get(string, wasmcache.GetOptions) (string, error) {
+func (f *fakeNackCache) Get(string, trafficextensions.GetOptions) (string, error) {
 	return "", errors.New("error")
 }
 func (f *fakeNackCache) Cleanup() {}
@@ -439,8 +439,8 @@ func TestECDSWasmConversion(t *testing.T) {
 	}
 	proxy := setupXdsProxy(t)
 	// Reset wasm cache to a fake ACK cache.
-	proxy.wasmCache.Cleanup()
-	proxy.wasmCache = &fakeAckCache{}
+	proxy.extensionCache.Cleanup()
+	proxy.extensionCache = &fakeAckCache{}
 
 	// Initialize discovery server with an ECDS resource.
 	ef, err := os.ReadFile(path.Join(env.IstioSrc, "pilot/pkg/xds/testdata/ecds.yaml"))
@@ -505,7 +505,7 @@ func TestECDSWasmConversion(t *testing.T) {
 	}
 
 	// reset wasm cache to a NACK cache, and recreate xds server as well to simulate a version bump
-	proxy.wasmCache = &fakeNackCache{}
+	proxy.extensionCache = &fakeNackCache{}
 	f = xds.NewFakeDiscoveryServer(t, xds.FakeOptions{
 		ConfigString: string(ef),
 	})
@@ -539,7 +539,7 @@ func TestECDSWasmConversion(t *testing.T) {
 	}
 	httpDenyAll := &httprbac.RBAC{
 		Rules:           &rbacv3.RBAC{},
-		RulesStatPrefix: wasmcache.DefaultDenyStatPrefix,
+		RulesStatPrefix: trafficextensions.DefaultDenyStatPrefix,
 	}
 	wantEcdsConfig = &core.TypedExtensionConfig{
 		Name:        "extension-config",

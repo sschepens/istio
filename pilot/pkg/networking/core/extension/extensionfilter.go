@@ -15,17 +15,21 @@
 package extension
 
 import (
+	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	wasmextensions "github.com/envoyproxy/go-control-plane/envoy/extensions/wasm/v3"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	extensions "istio.io/api/extensions/v1alpha1"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/config/xds"
 	"istio.io/istio/pkg/log"
+	pm "istio.io/istio/pkg/model"
+	"istio.io/istio/pkg/util/protomarshal"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -89,7 +93,7 @@ func PopAppendNetworkTrafficExtension(list []*listener.Filter,
 
 // toEnvoyHTTPTrafficExtension converts a TrafficExtensionWrapper to an Envoy HTTP filter.
 // For Lua filters, it inlines the code directly using TypedConfig.
-// For WASM filters, it uses ConfigDiscovery (ECDS).
+// Wasm and DynamicModule filters use ConfigDiscovery (ECDS).
 func toEnvoyHTTPTrafficExtension(filter *model.TrafficExtensionWrapper) *hcm.HttpFilter {
 	if filter == nil {
 		return nil
@@ -107,6 +111,10 @@ func toEnvoyHTTPTrafficExtension(filter *model.TrafficExtensionWrapper) *hcm.Htt
 				TypedConfig: protoconv.MessageToAny(luaConfig),
 			},
 		}
+	} else if filter.GetDynamicModule() != nil {
+		return &hcm.HttpFilter{Name: filter.ResourceName, ConfigType: &hcm.HttpFilter_ConfigDiscovery{ConfigDiscovery: &core.ExtensionConfigSource{
+			ConfigSource: defaultConfigSource, TypeUrls: []string{pm.DynamicModuleHTTPFilterType},
+		}}}
 	} else if filter.GetWasm() != nil {
 		// WASM filters use ECDS
 		return &hcm.HttpFilter{
@@ -127,7 +135,7 @@ func toEnvoyHTTPTrafficExtension(filter *model.TrafficExtensionWrapper) *hcm.Htt
 }
 
 // toEnvoyNetworkTrafficExtension converts a TrafficExtensionWrapper to an Envoy network filter.
-// Only WASM filters are supported for network (L4) filtering.
+// Wasm and DynamicModule filters support network (L4) filtering.
 // Lua filters do not support network filtering and will return nil with a warning.
 func toEnvoyNetworkTrafficExtension(filter *model.TrafficExtensionWrapper) *listener.Filter {
 	if filter == nil {
@@ -138,6 +146,10 @@ func toEnvoyNetworkTrafficExtension(filter *model.TrafficExtensionWrapper) *list
 		// Lua filters do not support network (L4) filtering
 		log.Warnf("Lua filters do not support network filtering, skipping TrafficExtension %s", filter.ResourceName)
 		return nil
+	} else if filter.GetDynamicModule() != nil {
+		return &listener.Filter{Name: filter.ResourceName, ConfigType: &listener.Filter_ConfigDiscovery{ConfigDiscovery: &core.ExtensionConfigSource{
+			ConfigSource: defaultConfigSource, TypeUrls: []string{pm.DynamicModuleNetworkFilterType},
+		}}}
 	} else if filter.GetWasm() != nil {
 		// WASM filters use ECDS
 		return &listener.Filter{
@@ -158,7 +170,7 @@ func toEnvoyNetworkTrafficExtension(filter *model.TrafficExtensionWrapper) *list
 }
 
 // InsertedTrafficExtensionConfigurations builds ECDS configurations for TrafficExtensions.
-// Only WASM filters are included; Lua filters are already inlined in listeners.
+// Wasm and DynamicModule filters are included; Lua is inlined in listeners.
 func InsertedTrafficExtensionConfigurations(
 	trafficExtensions []*model.TrafficExtensionWrapper,
 	names []string, pullSecrets map[string][]byte,
@@ -176,7 +188,28 @@ func InsertedTrafficExtensionConfigurations(
 		if filter.GetLua() != nil {
 			continue
 		}
-		// Only WASM filters use ECDS
+		// Carry download options in an agent-only envelope. The agent replaces it
+		// with the Envoy filter config after fetching the library and strips credentials.
+		if d := filter.GetDynamicModule(); d != nil {
+			data, err := protomarshal.ToJSON(d)
+			if err != nil {
+				log.Warnf("cannot encode DynamicModule %s: %v", filter.ResourceName, err)
+				continue
+			}
+			value := &structpb.Struct{}
+			if err := protomarshal.Unmarshal([]byte(data), value); err != nil {
+				continue
+			}
+			if d.ImagePullSecret != "" {
+				value.Fields["imagePullSecret"] = structpb.NewStringValue(string(pullSecrets[d.ImagePullSecret]))
+			}
+			value.Fields["resourceVersion"] = structpb.NewStringValue(filter.ResourceVersion)
+			result = append(result, &core.TypedExtensionConfig{Name: filter.ResourceName, TypedConfig: protoconv.MessageToAny(&udpa.TypedStruct{
+				TypeUrl: pm.DynamicModuleTransportType, Value: value,
+			})})
+			continue
+		}
+		// Build the remaining Wasm configurations.
 		switch filter.GetWasm().Type {
 		case extensions.PluginType_NETWORK:
 			wasmExtensionConfig := filter.BuildNetworkWasmFilter()

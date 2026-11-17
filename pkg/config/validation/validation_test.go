@@ -8561,7 +8561,7 @@ func TestValidateTrafficExtension(t *testing.T) {
 		{
 			"neither wasm nor lua set",
 			&extensions.TrafficExtension{},
-			"exactly one of wasm or lua must be set",
+			"exactly one of wasm, lua or dynamicModule must be set",
 			"",
 		},
 		{
@@ -9100,6 +9100,26 @@ func TestValidateAuthorizationPolicyMixedHTTPRouteTargetRefs(t *testing.T) {
 			}
 			if !tc.valid && err != nil && !strings.Contains(err.Error(), "must not be combined") {
 				t.Errorf("rejected for the wrong reason: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateDynamicModule(t *testing.T) {
+	for _, tc := range []struct {
+		url, sha string
+		valid    bool
+	}{
+		{"oci://registry/module:v1", "", true}, {"file:///lib/module.so", "", true},
+		{"https://registry/module.so", "", true}, {"", "", false}, {"ftp://registry/module.so", "", false},
+		{"oci://registry/module:v1", "invalid", false},
+	} {
+		t.Run(tc.url+tc.sha, func(t *testing.T) {
+			_, err := ValidateTrafficExtension(config.Config{Spec: &extensions.TrafficExtension{FilterConfig: &extensions.TrafficExtension_DynamicModule{
+				DynamicModule: &extensions.DynamicModuleConfig{Url: tc.url, Sha256: tc.sha},
+			}}})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v: %v", tc.valid, err)
 			}
 		})
 	}

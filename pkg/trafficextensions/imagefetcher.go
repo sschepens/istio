@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wasm
+package trafficextensions
 
 import (
 	"archive/tar"
@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/docker/cli/cli/config/configfile"
@@ -46,6 +47,7 @@ import (
 // Basically, this supports fetching and unpackaging three types of container images containing a Wasm binary.
 
 type ImageFetcherOption struct {
+	DynamicModule bool
 	// TODO(mathetake) Add signature verification stuff.
 	PullSecret []byte
 	Insecure   bool
@@ -63,7 +65,8 @@ func (o ImageFetcherOption) String() string {
 }
 
 type ImageFetcher struct {
-	fetchOpts []remote.Option
+	dynamicModule bool
+	fetchOpts     []remote.Option
 	// allowInsecureHTTPDowngrade mirrors ImageFetcherOption.Insecure: whether the operator has
 	// explicitly allowlisted this registry (via WASM_INSECURE_REGISTRIES) to be accessed without
 	// transport security. This is what gates PrepareFetch's HTTPS-to-HTTP retry.
@@ -192,6 +195,7 @@ func NewImageFetcher(ctx context.Context, opt ImageFetcherOption) *ImageFetcher 
 
 	return &ImageFetcher{
 		fetchOpts:                  append(fetchOpts, remote.WithContext(ctx)),
+		dynamicModule:              opt.DynamicModule,
 		allowInsecureHTTPDowngrade: opt.Insecure,
 	}
 }
@@ -235,8 +239,14 @@ func (o *ImageFetcher) PrepareFetch(url string) (binaryFetcher func() ([]byte, e
 		return binaryFetcher, actualDigest, err
 	}
 
-	// Fetch image.
-	img, err := desc.Image()
+	// Select native modules explicitly; the registry library otherwise defaults to linux/amd64.
+	digest := desc.Digest.Hex
+	var img v1.Image
+	if o.dynamicModule {
+		img, err = nativeImage(desc, runtime.GOARCH)
+	} else {
+		img, err = desc.Image()
+	}
 	if err != nil {
 		err = fmt.Errorf("could not fetch image: %v", err)
 		return binaryFetcher, actualDigest, err
@@ -245,7 +255,13 @@ func (o *ImageFetcher) PrepareFetch(url string) (binaryFetcher func() ([]byte, e
 	// Check Manifest's digest if expManifestDigest is not empty.
 	d, _ := img.Digest()
 	actualDigest = d.Hex
+	if o.dynamicModule {
+		actualDigest = digest
+	}
 	binaryFetcher = func() ([]byte, error) {
+		if o.dynamicModule {
+			return extractDynamicModule(img)
+		}
 		manifest, err := img.Manifest()
 		if err != nil {
 			return nil, fmt.Errorf("could not retrieve manifest: %v", err)
@@ -486,4 +502,87 @@ func (k *wasmKeyChain) Resolve(target authn.Resource) (authn.Authenticator, erro
 		RegistryToken: cfg.RegistryToken,
 	}
 	return authn.FromConfig(authConfig), nil
+}
+
+// nativeImage rejects absent platform metadata and mismatches, including single manifests.
+func nativeImage(desc *remote.Descriptor, arch string) (v1.Image, error) {
+	var img v1.Image
+	var err error
+	if desc.MediaType.IsIndex() {
+		index, e := desc.ImageIndex()
+		if e != nil {
+			return nil, e
+		}
+		manifest, e := index.IndexManifest()
+		if e != nil {
+			return nil, e
+		}
+		for _, candidate := range manifest.Manifests {
+			if candidate.Platform != nil && candidate.Platform.OS == "linux" && candidate.Platform.Architecture == arch {
+				img, err = index.Image(candidate.Digest)
+				break
+			}
+		}
+		if img == nil && err == nil {
+			return nil, fmt.Errorf("no dynamic module image for linux/%s", arch)
+		}
+	} else {
+		img, err = desc.Image()
+	}
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.OS != "linux" || cfg.Architecture != arch {
+		return nil, fmt.Errorf("dynamic module image platform %s/%s does not match linux/%s", cfg.OS, cfg.Architecture, arch)
+	}
+	return img, nil
+}
+
+// Images package plugin.so in the final tar layer, analogous to Wasm's plugin.wasm.
+func extractDynamicModule(img v1.Image) ([]byte, error) {
+	layers, err := img.Layers()
+	if err != nil {
+		return nil, err
+	}
+	if len(layers) == 0 {
+		return nil, fmt.Errorf("dynamic module image has no layers")
+	}
+	r, err := layers[len(layers)-1].Uncompressed()
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	b, found, err := readDynamicModuleLayer(r)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("plugin.so not found in final image layer")
+	}
+	return b, nil
+}
+
+func readDynamicModuleLayer(r io.Reader) ([]byte, bool, error) {
+	tr := tar.NewReader(io.LimitReader(r, features.MaxWasmBinarySizeBytes+1))
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		if filepath.Clean(h.Name) != "plugin.so" {
+			continue
+		}
+		if h.Typeflag != tar.TypeReg || h.Size <= 0 || h.Size > features.MaxWasmBinarySizeBytes {
+			return nil, false, fmt.Errorf("invalid plugin.so size or file type")
+		}
+		b, err := io.ReadAll(io.LimitReader(tr, features.MaxWasmBinarySizeBytes+1))
+		return b, true, err
+	}
 }

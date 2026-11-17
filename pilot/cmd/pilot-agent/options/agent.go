@@ -23,8 +23,8 @@ import (
 	"istio.io/istio/pkg/bootstrap/platform"
 	istioagent "istio.io/istio/pkg/istio-agent"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/trafficextensions"
 	"istio.io/istio/pkg/util/sets"
-	"istio.io/istio/pkg/wasm"
 )
 
 // Similar with ISTIO_META_, which is used to customize the node metadata - this customizes extra header.
@@ -43,7 +43,7 @@ func NewAgentOptions(proxy *ProxyArgs, cfg *meshconfig.ProxyConfig, sds istioage
 		IsIPv6:                   proxy.IsIPv6(),
 		ProxyType:                proxy.Type,
 		EnableDynamicProxyConfig: enableProxyConfigXdsEnv,
-		WASMOptions: wasm.Options{
+		TrafficExtensionOptions: trafficextensions.Options{
 			InsecureRegistries:    sets.New(insecureRegistries...),
 			ModuleExpiry:          wasmModuleExpiry,
 			PurgeInterval:         wasmPurgeInterval,

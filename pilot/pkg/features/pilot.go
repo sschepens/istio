@@ -400,7 +400,7 @@ var (
 	}()
 
 	// BlockedCIDRsInWasmFetch is additive to the always-on link-local block applied to Wasm
-	// module fetches (see pkg/wasm/ssrf.go); it lets operators also block private ranges or
+	// module fetches (see pkg/trafficextensions/ssrf.go); it lets operators also block private ranges or
 	// specific in-cluster addresses (e.g. the Kubernetes API server or kubelet) if their
 	// environment does not need to fetch Wasm modules from internal registries/servers.
 	BlockedCIDRsInWasmFetch = func() []*net.IPNet {

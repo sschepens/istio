@@ -32,7 +32,7 @@ import (
 	"istio.io/istio/pkg/istio-agent/metrics"
 	"istio.io/istio/pkg/model"
 	"istio.io/istio/pkg/slices"
-	"istio.io/istio/pkg/wasm"
+	"istio.io/istio/pkg/trafficextensions"
 )
 
 // sendDeltaRequest is a small wrapper around sending to con.requestsChan. This ensures that we do not
@@ -272,7 +272,7 @@ func (p *XdsProxy) deltaRewriteAndForward(con *ProxyConnection, resp *discovery.
 		resources = append(resources, resp.Resources[i].Resource)
 	}
 
-	if err := wasm.MaybeConvertWasmExtensionConfig(resources, p.wasmCache); err != nil {
+	if err := trafficextensions.MaybeConvertExtensionConfig(resources, p.extensionCache); err != nil {
 		proxyLog.Debugf("sending NACK for ECDS resources %+v, err: %+v", resp.Resources, err)
 		con.sendDeltaRequest(&discovery.DeltaDiscoveryRequest{
 			TypeUrl:       resp.TypeUrl,

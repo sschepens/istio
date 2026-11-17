@@ -194,6 +194,9 @@ func (e *TrafficExtensionWrapper) MatchType(chainType FilterChainType) bool {
 		// Lua only supports HTTP filters
 		return chainType == FilterChainTypeAny || chainType == FilterChainTypeHTTP
 	}
+	if d := e.GetDynamicModule(); d != nil {
+		return chainType == FilterChainTypeAny || chainType == filterChainTypeFromPluginType(d.Type)
+	}
 	// For WASM, check the type field
 	wasmType := filterChainTypeFromPluginType(e.GetWasm().GetType())
 	return chainType == FilterChainTypeAny || chainType == wasmType
@@ -331,6 +334,23 @@ func convertToTrafficExtensionWrapper(originConfig config.Config) *TrafficExtens
 				wasm.ImagePullSecret = sr.KubernetesResourceName()
 			}
 		}
+	} else if d := trafficExt.GetDynamicModule(); d != nil {
+		if d.Url == "" {
+			log.Warnf("trafficextension %v/%v discarded: dynamicModule.url is required", plugin.Namespace, plugin.Name)
+			return nil
+		}
+		if _, err := url.Parse(d.Url); err != nil {
+			log.Warnf("trafficextension %v/%v discarded due to failure to parse DynamicModule URL: %s", plugin.Namespace, plugin.Name, err)
+			return nil
+		}
+		if d.ImagePullSecret != "" {
+			sr, err := credentials.ParseResourceName(credentials.ToResourceName(d.ImagePullSecret), plugin.Namespace, "", "")
+			if err != nil {
+				return nil
+			}
+			sr.Namespace = plugin.Namespace
+			d.ImagePullSecret = sr.KubernetesResourceName()
+		}
 	} else if lua != nil {
 		// Validate Lua config
 		if len(lua.InlineCode) == 0 {
@@ -342,7 +362,7 @@ func convertToTrafficExtensionWrapper(originConfig config.Config) *TrafficExtens
 			return nil
 		}
 	} else {
-		log.Warnf("trafficextension %v/%v discarded: neither wasm nor lua is set", plugin.Namespace, plugin.Name)
+		log.Warnf("trafficextension %v/%v discarded: none of wasm, lua or dynamicModule is set", plugin.Namespace, plugin.Name)
 		return nil
 	}
 

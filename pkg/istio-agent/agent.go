@@ -46,8 +46,8 @@ import (
 	"istio.io/istio/pkg/model"
 	"istio.io/istio/pkg/security"
 	"istio.io/istio/pkg/sleep"
+	"istio.io/istio/pkg/trafficextensions"
 	"istio.io/istio/pkg/util/protomarshal"
-	"istio.io/istio/pkg/wasm"
 	"istio.io/istio/security/pkg/nodeagent/cache"
 )
 
@@ -226,7 +226,7 @@ type AgentOptions struct {
 
 	IstiodSAN string
 
-	WASMOptions wasm.Options
+	TrafficExtensionOptions trafficextensions.Options
 
 	// Enable metadata discovery bootstrap extension
 	MetadataDiscovery *bool

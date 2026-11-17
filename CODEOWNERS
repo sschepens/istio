@@ -38,7 +38,7 @@ Makefile*                                                        @istio/wg-test-
 /pkg/test/                                                       @istio/wg-test-and-release-maintainers
 /pkg/fuzz/                                                       @istio/wg-test-and-release-maintainers
 /pkg/tracing/                                                    @istio/wg-policies-and-telemetry-maintainers
-/pkg/wasm/                                                       @istio/wg-policies-and-telemetry-maintainers
+/pkg/trafficextensions/                                          @istio/wg-policies-and-telemetry-maintainers
 /pkg/webhooks/                                                   @istio/wg-user-experience-maintainers
 /pkg/workloadapi/                                                @istio/wg-networking-maintainers
 /prow/                                                           @istio/wg-test-and-release-maintainers

@@ -3590,8 +3590,8 @@ var ValidateTrafficExtension = RegisterValidateFunc("ValidateTrafficExtension",
 		lua := spec.GetLua()
 
 		// Validate exactly one of wasm or lua is set
-		if (wasm != nil && lua != nil) || (wasm == nil && lua == nil) {
-			errs = AppendValidation(errs, fmt.Errorf("exactly one of wasm or lua must be set"))
+		if wasm == nil && lua == nil && spec.GetDynamicModule() == nil {
+			errs = AppendValidation(errs, fmt.Errorf("exactly one of wasm, lua or dynamicModule must be set"))
 		}
 
 		// Validate selector type
@@ -3615,6 +3615,13 @@ var ValidateTrafficExtension = RegisterValidateFunc("ValidateTrafficExtension",
 				validateWasmConfigName(wasm),
 				validateWasmPluginVMConfig(wasm.VmConfig),
 			)
+		}
+
+		if d := spec.GetDynamicModule(); d != nil {
+			errs = AppendValidation(errs, validateWasmPluginURL(d.Url),
+				validateWasmConfigSHA(&extensions.WasmConfig{Sha256: d.Sha256}),
+				validateWasmConfigImagePullSecret(&extensions.WasmConfig{ImagePullSecret: d.ImagePullSecret}),
+				validateWasmConfigName(&extensions.WasmConfig{PluginName: d.PluginName}))
 		}
 
 		// Validate match selectors

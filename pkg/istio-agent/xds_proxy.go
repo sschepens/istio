@@ -43,8 +43,8 @@ import (
 	istiokeepalive "istio.io/istio/pkg/keepalive"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/model"
+	"istio.io/istio/pkg/trafficextensions"
 	"istio.io/istio/pkg/uds"
-	"istio.io/istio/pkg/wasm"
 	xdspkg "istio.io/istio/pkg/xds"
 	"istio.io/istio/security/pkg/nodeagent/caclient"
 	"istio.io/istio/security/pkg/pki/util"
@@ -96,8 +96,8 @@ type XdsProxy struct {
 	initialDeltaHealthRequest *discovery.DeltaDiscoveryRequest
 	connectedMutex            sync.RWMutex
 
-	// Wasm cache and ecds channel are used to replace wasm remote load with local file.
-	wasmCache wasm.Cache
+	// The extension cache and ECDS channel replace remote Wasm and DynamicModule sources with local files.
+	extensionCache trafficextensions.Cache
 
 	// ecds version and nonce uses atomic only to prevent race in testing.
 	// In reality there should not be race as istiod will only have one
@@ -132,7 +132,7 @@ func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 		}
 	}
 
-	cache := wasm.NewLocalFileCache(constants.IstioDataDir, ia.cfg.WASMOptions)
+	cache := trafficextensions.NewLocalFileCache(constants.IstioDataDir, ia.cfg.TrafficExtensionOptions)
 	proxy := &XdsProxy{
 		istiodAddress:         ia.proxyConfig.DiscoveryAddress,
 		istiodSAN:             ia.cfg.IstiodSAN,
@@ -142,7 +142,7 @@ func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 		healthChecker:         health.NewWorkloadHealthChecker(ia.proxyConfig.ReadinessProbe, envoyProbe, ia.cfg.ProxyIPAddresses, ia.cfg.IsIPv6),
 		xdsHeaders:            ia.cfg.XDSHeaders,
 		xdsUdsPath:            ia.cfg.XdsUdsPath,
-		wasmCache:             cache,
+		extensionCache:        cache,
 		proxyAddresses:        ia.cfg.ProxyIPAddresses,
 		ia:                    ia,
 		downstreamGrpcOptions: ia.cfg.DownstreamGrpcOptions,
@@ -534,7 +534,7 @@ func (p *XdsProxy) handleUpstreamResponse(con *ProxyConnection) {
 }
 
 func (p *XdsProxy) rewriteAndForward(con *ProxyConnection, resp *discovery.DiscoveryResponse, forward func(resp *discovery.DiscoveryResponse)) {
-	if err := wasm.MaybeConvertWasmExtensionConfig(resp.Resources, p.wasmCache); err != nil {
+	if err := trafficextensions.MaybeConvertExtensionConfig(resp.Resources, p.extensionCache); err != nil {
 		proxyLog.Debugf("sending NACK for ECDS resources %+v, err: %+v", resp.Resources, err)
 		con.sendRequest(&discovery.DiscoveryRequest{
 			VersionInfo:   p.ecdsLastAckVersion.Load(),
@@ -581,7 +581,7 @@ func sendDownstream(downstream adsStream, response *discovery.DiscoveryResponse)
 
 func (p *XdsProxy) close() {
 	close(p.stopChan)
-	p.wasmCache.Cleanup()
+	p.extensionCache.Cleanup()
 	if p.downstreamGrpcServer != nil {
 		p.downstreamGrpcServer.Stop()
 	}

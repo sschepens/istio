@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wasm
+package trafficextensions
 
 import (
 	"errors"
@@ -180,7 +180,7 @@ func TestWasmConvertWithWrongMessages(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			mc := &mockCache{}
-			gotErr := MaybeConvertWasmExtensionConfig(tc.input, mc)
+			gotErr := MaybeConvertExtensionConfig(tc.input, mc)
 			if gotErr == nil {
 				t.Errorf("wasm config conversion should return error, but did not")
 			}
@@ -316,7 +316,7 @@ func TestWasmConvert(t *testing.T) {
 				resources = append(resources, protoconv.MessageToAny(i))
 			}
 			mc := &mockCache{}
-			gotErr := MaybeConvertWasmExtensionConfig(resources, mc)
+			gotErr := MaybeConvertExtensionConfig(resources, mc)
 			if len(resources) != len(c.wantOutput) {
 				t.Fatalf("wasm config conversion number of configuration got %v want %v", len(resources), len(c.wantOutput))
 			}

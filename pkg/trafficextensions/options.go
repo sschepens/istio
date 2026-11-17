@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wasm
+package trafficextensions
 
 import (
 	"time"
@@ -62,6 +62,8 @@ var PullPolicyValues = map[string]PullPolicy{
 
 // GetOptions is a struct for providing options to Get method of Cache.
 type GetOptions struct {
+	// DynamicModule selects native shared libraries and isolates them from Wasm cache entries.
+	DynamicModule   bool
 	Checksum        string
 	ResourceName    string
 	ResourceVersion string

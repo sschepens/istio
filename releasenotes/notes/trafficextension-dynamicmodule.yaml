@@ -1,0 +1,9 @@
+apiVersion: release-notes/v2
+kind: feature
+area: extensibility
+releaseNotes:
+- |
+  **Added** support for HTTP and network DynamicModule filters in TrafficExtension.
+  The agent downloads native libraries from HTTP or OCI sources. OCI images must
+  identify a matching Linux architecture; multi-platform images are selected for
+  the agent's architecture. Images package the library as `plugin.so` in the final tar layer.

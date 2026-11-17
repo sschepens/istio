@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wasm
+package trafficextensions
 
 import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,13 +46,13 @@ const (
 	sha256SchemePrefix = "sha256:"
 )
 
-// Cache models a Wasm module cache.
+// Cache stores downloaded Wasm and DynamicModule binaries.
 type Cache interface {
 	Get(url string, opts GetOptions) (string, error)
 	Cleanup()
 }
 
-// LocalFileCache for downloaded Wasm modules. Currently it stores the Wasm module as local file.
+// LocalFileCache stores downloaded Wasm and DynamicModule binaries as local files.
 type LocalFileCache struct {
 	// Map from Wasm module checksum to cache entry.
 	modules map[moduleKey]*cacheEntry
@@ -80,6 +82,7 @@ type checksumEntry struct {
 }
 
 type moduleKey struct {
+	dynamicModule bool
 	// Identifier for the module. It should be neutral for the checksum.
 	// e.g.) oci://docker.io/test@sha256:0123456789 is not allowed.
 	//       oci://docker.io/test:latest (tagged form) is allowed.
@@ -141,7 +144,7 @@ func (o cacheOptions) allowInsecure(host string) bool {
 	return o.allowAllInsecureRegistries || o.InsecureRegistries.Contains(host)
 }
 
-// NewLocalFileCache create a new Wasm module cache which downloads and stores Wasm module files locally.
+// NewLocalFileCache creates a cache that downloads and stores extension binaries locally.
 func NewLocalFileCache(dir string, options Options) *LocalFileCache {
 	wasmLog.Debugf("LocalFileCache is created with the option\n%#v", options)
 
@@ -192,17 +195,18 @@ func getModulePath(baseDir string, mkey moduleKey) (string, error) {
 	if err := os.Mkdir(moduleDir, 0o755); err != nil && !os.IsExist(err) {
 		return "", err
 	}
-	return filepath.Join(moduleDir, fmt.Sprintf("%s.wasm", mkey.checksum)), nil
+	return filepath.Join(moduleDir, fmt.Sprintf("%s%s", mkey.checksum, moduleSuffix(mkey.dynamicModule))), nil
 }
 
-// Get returns path the local Wasm module file.
+// Get returns the path to the local extension binary.
 func (c *LocalFileCache) Get(downloadURL string, opts GetOptions) (string, error) {
 	// Construct Wasm cache key with downloading URL and provided checksum of the module.
 	key := cacheKey{
 		downloadURL: downloadURL,
 		moduleKey: moduleKey{
-			name:     moduleNameFromURL(downloadURL),
-			checksum: opts.Checksum,
+			name:          moduleNameFromURL(downloadURL),
+			dynamicModule: opts.DynamicModule,
+			checksum:      opts.Checksum,
 		},
 		resourceName:    opts.ResourceName,
 		resourceVersion: opts.ResourceVersion,
@@ -250,7 +254,8 @@ func (c *LocalFileCache) getOrFetch(key cacheKey, opts GetOptions) (*cacheEntry,
 		dChecksum = hex.EncodeToString(sha[:])
 	case "oci":
 		imgFetcherOps := ImageFetcherOption{
-			Insecure: insecure,
+			Insecure:      insecure,
+			DynamicModule: opts.DynamicModule,
 		}
 		if opts.PullSecret != nil {
 			imgFetcherOps.PullSecret = opts.PullSecret
@@ -285,8 +290,11 @@ func (c *LocalFileCache) getOrFetch(key cacheKey, opts GetOptions) (*cacheEntry,
 		}
 	}
 
-	if !isValidWasmBinary(b) {
+	if (!opts.DynamicModule && !isValidWasmBinary(b)) || (opts.DynamicModule && !isValidDynamicModule(b)) {
 		wasmRemoteFetchCount.With(resultTag.Value(fetchFailure)).Increment()
+		if opts.DynamicModule {
+			return nil, fmt.Errorf("fetched DynamicModule binary from %s is not a shared library for linux/%s", key.downloadURL, runtime.GOARCH)
+		}
 		return nil, fmt.Errorf("fetched Wasm binary from %s is invalid", key.downloadURL)
 	}
 
@@ -305,11 +313,11 @@ func (c *LocalFileCache) updateChecksum(key cacheKey) bool {
 	// If OCI URL having a tag or just http/https URL, we need to update checksum.
 	needChecksumUpdate := !strings.HasPrefix(key.downloadURL, ociURLPrefix) || !strings.Contains(key.downloadURL, "@")
 	if needChecksumUpdate {
-		ce := c.checksums[key.downloadURL]
+		ce := c.checksums[key.checksumURL()]
 		if ce == nil {
 			ce = new(checksumEntry)
 			ce.resourceVersionByResource = make(map[string]string)
-			c.checksums[key.downloadURL] = ce
+			c.checksums[key.checksumURL()] = ce
 		}
 		ce.checksum = key.checksum
 		ce.resourceVersionByResource[key.resourceName] = key.resourceVersion
@@ -329,7 +337,7 @@ func (c *LocalFileCache) addEntry(key cacheKey, wasmModule []byte) (*cacheEntry,
 		// Update last touched time.
 		ce.last = time.Now()
 		if needChecksumUpdate {
-			ce.referencingURLs.Insert(key.downloadURL)
+			ce.referencingURLs.Insert(key.checksumURL())
 		}
 		return ce, nil
 	}
@@ -349,7 +357,7 @@ func (c *LocalFileCache) addEntry(key cacheKey, wasmModule []byte) (*cacheEntry,
 		referencingURLs: sets.New[string](),
 	}
 	if needChecksumUpdate {
-		ce.referencingURLs.Insert(key.downloadURL)
+		ce.referencingURLs.Insert(key.checksumURL())
 	}
 	c.modules[key.moduleKey] = &ce
 	wasmCacheEntries.Record(float64(len(c.modules)))
@@ -380,7 +388,7 @@ func (c *LocalFileCache) getEntry(key cacheKey, ignoreResourceVersion bool) (*ca
 	if len(key.checksum) == 0 {
 		// If no checksum, try the checksum cache.
 		// If the image was pulled before, there should be a checksum of the most recently pulled image.
-		if ce, found := c.checksums[key.downloadURL]; found {
+		if ce, found := c.checksums[key.checksumURL()]; found {
 			if ignoreResourceVersion || key.resourceVersion == ce.resourceVersionByResource[key.resourceName] {
 				// Update checksum
 				key.checksum = ce.checksum
@@ -443,4 +451,39 @@ var wasmMagicNumber = []byte{0x00, 0x61, 0x73, 0x6d}
 func isValidWasmBinary(in []byte) bool {
 	// Wasm file header is 8 bytes (magic number + version).
 	return len(in) >= 8 && bytes.Equal(in[:4], wasmMagicNumber)
+}
+
+func moduleSuffix(dynamic bool) string {
+	if dynamic {
+		return ".so"
+	}
+	return ".wasm"
+}
+
+func (key cacheKey) checksumURL() string {
+	if key.dynamicModule {
+		return key.downloadURL + "#istio-dynamic-module"
+	}
+	return key.downloadURL
+}
+
+// Native modules must be Linux shared objects for the agent's architecture.
+func isValidDynamicModule(b []byte) bool {
+	f, err := elf.NewFile(bytes.NewReader(b))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	machines := map[string]elf.Machine{"amd64": elf.EM_X86_64, "arm64": elf.EM_AARCH64, "arm": elf.EM_ARM,
+		"ppc64le": elf.EM_PPC64, "s390x": elf.EM_S390, "riscv64": elf.EM_RISCV}
+	machine, ok := machines[runtime.GOARCH]
+	class := elf.ELFCLASS64
+	if runtime.GOARCH == "arm" {
+		class = elf.ELFCLASS32
+	}
+	data := elf.ELFDATA2LSB
+	if runtime.GOARCH == "s390x" {
+		data = elf.ELFDATA2MSB
+	}
+	return ok && f.Type == elf.ET_DYN && f.Machine == machine && f.Class == class && f.Data == data
 }

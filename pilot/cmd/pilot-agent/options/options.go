@@ -25,7 +25,7 @@ import (
 	"istio.io/istio/pkg/env"
 	"istio.io/istio/pkg/jwt"
 	"istio.io/istio/pkg/security"
-	"istio.io/istio/pkg/wasm"
+	"istio.io/istio/pkg/trafficextensions"
 )
 
 var (
@@ -132,16 +132,16 @@ var (
 	wasmInsecureRegistries = env.Register("WASM_INSECURE_REGISTRIES", "",
 		"allow agent pull wasm plugin from insecure registries or https server, for example: 'localhost:5000,docker-registry:5000'").Get()
 
-	wasmModuleExpiry = env.Register("WASM_MODULE_EXPIRY", wasm.DefaultModuleExpiry,
+	wasmModuleExpiry = env.Register("WASM_MODULE_EXPIRY", trafficextensions.DefaultModuleExpiry,
 		"cache expiration duration for a wasm module.").Get()
 
-	wasmPurgeInterval = env.Register("WASM_PURGE_INTERVAL", wasm.DefaultPurgeInterval,
+	wasmPurgeInterval = env.Register("WASM_PURGE_INTERVAL", trafficextensions.DefaultPurgeInterval,
 		"interval between checking the expiration of wasm modules").Get()
 
-	wasmHTTPRequestTimeout = env.Register("WASM_HTTP_REQUEST_TIMEOUT", wasm.DefaultHTTPRequestTimeout,
+	wasmHTTPRequestTimeout = env.Register("WASM_HTTP_REQUEST_TIMEOUT", trafficextensions.DefaultHTTPRequestTimeout,
 		"timeout per a HTTP request for pulling a Wasm module via http/https").Get()
 
-	wasmHTTPRequestMaxRetries = env.Register("WASM_HTTP_REQUEST_MAX_RETRIES", wasm.DefaultHTTPRequestMaxRetries,
+	wasmHTTPRequestMaxRetries = env.Register("WASM_HTTP_REQUEST_MAX_RETRIES", trafficextensions.DefaultHTTPRequestMaxRetries,
 		"maximum number of HTTP/HTTPS request retries for pulling a Wasm module via http/https").Get()
 
 	enableWDSEnv, enableWDSEnvWasSet = env.Register("PEER_METADATA_DISCOVERY", false,

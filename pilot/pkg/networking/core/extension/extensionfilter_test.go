@@ -17,6 +17,7 @@ package extension
 import (
 	"testing"
 
+	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	lua "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/lua/v3"
@@ -27,6 +28,7 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/config/xds"
+	pm "istio.io/istio/pkg/model"
 	"istio.io/istio/pkg/test/util/assert"
 )
 
@@ -895,4 +897,25 @@ func TestMixedWasmLuaPriorityOrdering_PreservesSortedOrder(t *testing.T) {
 	assert.Equal(t, filters[1].GetTypedConfig() != nil, true, "Lua filter should use TypedConfig (inlined)")
 	assert.Equal(t, filters[2].GetTypedConfig() != nil, true, "Lua filter should use TypedConfig (inlined)")
 	assert.Equal(t, filters[3].GetConfigDiscovery() != nil, true, "WASM filter should use ConfigDiscovery")
+}
+
+func TestDynamicModuleECDS(t *testing.T) {
+	filter := &model.TrafficExtensionWrapper{ResourceName: "native", ResourceVersion: "42", TrafficExtension: &extensions.TrafficExtension{
+		FilterConfig: &extensions.TrafficExtension_DynamicModule{DynamicModule: &extensions.DynamicModuleConfig{Url: "oci://registry/native:v1", ImagePullSecret: "kubernetes://ns/pull"}},
+	}}
+	http := toEnvoyHTTPTrafficExtension(filter)
+	network := toEnvoyNetworkTrafficExtension(filter)
+	assert.Equal(t, http.GetConfigDiscovery().TypeUrls, []string{pm.DynamicModuleHTTPFilterType})
+	assert.Equal(t, network.GetConfigDiscovery().TypeUrls, []string{pm.DynamicModuleNetworkFilterType})
+	configs := InsertedTrafficExtensionConfigurations([]*model.TrafficExtensionWrapper{filter}, []string{"native"}, map[string][]byte{"kubernetes://ns/pull": []byte("secret")})
+	if len(configs) != 1 {
+		t.Fatal(configs)
+	}
+	envelope := &udpa.TypedStruct{}
+	if err := configs[0].TypedConfig.UnmarshalTo(envelope); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, envelope.TypeUrl, pm.DynamicModuleTransportType)
+	assert.Equal(t, envelope.Value.Fields["imagePullSecret"].GetStringValue(), "secret")
+	assert.Equal(t, envelope.Value.Fields["resourceVersion"].GetStringValue(), "42")
 }

@@ -626,7 +626,7 @@ var blockedCIDRDialContext = security.BlockedIPDialContext(&net.Dialer{}, jwksBl
 // as 169.254.169.254) and well-known cloud metadata addresses outside the link-local range, neither
 // of which has a legitimate use as a JWKS host, plus any operator-configured ranges from
 // BlockedCIDRsInJWKURIs. This mirrors the always-on default applied to Wasm module fetches
-// (pkg/wasm/ssrf.go). Private (RFC1918/ULA) and loopback ranges are not blocked by default since
+// (pkg/trafficextensions/ssrf.go). Private (RFC1918/ULA) and loopback ranges are not blocked by default since
 // in-cluster OIDC providers (e.g. Keycloak) legitimately live in private space; operators can add
 // them via BLOCKED_CIDRS_IN_JWKS_URIS.
 func jwksBlockedIP(ip net.IP) error {

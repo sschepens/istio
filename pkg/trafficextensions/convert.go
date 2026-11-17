@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wasm
+package trafficextensions
 
 import (
 	"fmt"
@@ -95,9 +95,9 @@ func createNetworkDefaultFilter(name string, failOpen bool) (*anypb.Any, error) 
 	return anypb.New(ec)
 }
 
-// MaybeConvertWasmExtensionConfig converts any presence of module remote download to local file.
-// It downloads the Wasm module and stores the module locally in the file system.
-func MaybeConvertWasmExtensionConfig(resources []*anypb.Any, cache Cache) error {
+// MaybeConvertExtensionConfig downloads remote Wasm and DynamicModule binaries and
+// rewrites their extension configurations to reference local files.
+func MaybeConvertExtensionConfig(resources []*anypb.Any, cache Cache) error {
 	var wg sync.WaitGroup
 
 	numResources := len(resources)
@@ -112,6 +112,14 @@ func MaybeConvertWasmExtensionConfig(resources []*anypb.Any, cache Cache) error 
 	for i := 0; i < numResources; i++ {
 		go func(i int) {
 			defer wg.Done()
+			if converted, handled, err := convertDynamicModule(resources[i], cache); handled {
+				if err != nil {
+					convertErrs[i] = err
+				} else {
+					resources[i] = converted
+				}
+				return
+			}
 			extConfig, wasmHTTPConfig, wasmNetworkConfig, err := tryUnmarshal(resources[i])
 			if err != nil {
 				wasmConfigConversionCount.
@@ -176,7 +184,7 @@ func MaybeConvertWasmExtensionConfig(resources []*anypb.Any, cache Cache) error 
 	wg.Wait()
 	err := multierror.Append(istiomultierror.New(), convertErrs...).ErrorOrNil()
 	if err != nil {
-		wasmLog.Errorf("error in applying failopen rbac config: %v", err)
+		wasmLog.Errorf("error converting extension config: %v", err)
 	}
 	return err
 }
