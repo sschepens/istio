@@ -68,7 +68,7 @@ type ImageFetcher struct {
 	dynamicModule bool
 	fetchOpts     []remote.Option
 	// allowInsecureHTTPDowngrade mirrors ImageFetcherOption.Insecure: whether the operator has
-	// explicitly allowlisted this registry (via WASM_INSECURE_REGISTRIES) to be accessed without
+	// explicitly allowlisted this registry (via TRAFFIC_EXTENSION_INSECURE_REGISTRIES) to be accessed without
 	// transport security. This is what gates PrepareFetch's HTTPS-to-HTTP retry.
 	allowInsecureHTTPDowngrade bool
 }

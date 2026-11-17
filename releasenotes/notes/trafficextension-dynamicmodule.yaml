@@ -7,3 +7,8 @@ releaseNotes:
   The agent downloads native libraries from HTTP or OCI sources. OCI images must
   identify a matching Linux architecture; multi-platform images are selected for
   the agent's architecture. Images package the library as `plugin.so` in the final tar layer.
+  Traffic extension cache and HTTP fetch settings can be configured with
+  `TRAFFIC_EXTENSION_MODULE_EXPIRY`, `TRAFFIC_EXTENSION_PURGE_INTERVAL`,
+  `TRAFFIC_EXTENSION_HTTP_REQUEST_TIMEOUT`, `TRAFFIC_EXTENSION_HTTP_REQUEST_MAX_RETRIES`,
+  and `TRAFFIC_EXTENSION_INSECURE_REGISTRIES`. Each defaults to its corresponding
+  `WASM_` setting unless explicitly set.

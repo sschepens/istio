@@ -130,19 +130,34 @@ var (
 		"If set to true, agent retrieves dynamic proxy-config updates via xds channel").Get()
 
 	wasmInsecureRegistries = env.Register("WASM_INSECURE_REGISTRIES", "",
-		"allow agent pull wasm plugin from insecure registries or https server, for example: 'localhost:5000,docker-registry:5000'").Get()
+		"Deprecated: Use TRAFFIC_EXTENSION_INSECURE_REGISTRIES instead. Allow agent pull wasm plugin from insecure registries or https server, for example: 'localhost:5000,docker-registry:5000'").Get()
 
 	wasmModuleExpiry = env.Register("WASM_MODULE_EXPIRY", trafficextensions.DefaultModuleExpiry,
-		"cache expiration duration for a wasm module.").Get()
+		"Deprecated: Use TRAFFIC_EXTENSION_MODULE_EXPIRY instead. Cache expiration duration for a wasm module.").Get()
 
 	wasmPurgeInterval = env.Register("WASM_PURGE_INTERVAL", trafficextensions.DefaultPurgeInterval,
-		"interval between checking the expiration of wasm modules").Get()
+		"Deprecated: Use TRAFFIC_EXTENSION_PURGE_INTERVAL instead. Interval between checking the expiration of wasm modules").Get()
 
 	wasmHTTPRequestTimeout = env.Register("WASM_HTTP_REQUEST_TIMEOUT", trafficextensions.DefaultHTTPRequestTimeout,
-		"timeout per a HTTP request for pulling a Wasm module via http/https").Get()
+		"Deprecated: Use TRAFFIC_EXTENSION_HTTP_REQUEST_TIMEOUT instead. Timeout per a HTTP request for pulling a Wasm module via http/https").Get()
 
 	wasmHTTPRequestMaxRetries = env.Register("WASM_HTTP_REQUEST_MAX_RETRIES", trafficextensions.DefaultHTTPRequestMaxRetries,
-		"maximum number of HTTP/HTTPS request retries for pulling a Wasm module via http/https").Get()
+		"Deprecated: Use TRAFFIC_EXTENSION_HTTP_REQUEST_MAX_RETRIES instead. Maximum number of HTTP/HTTPS request retries for pulling a Wasm module via http/https").Get()
+
+	trafficExtensionInsecureRegistries = env.Register("TRAFFIC_EXTENSION_INSECURE_REGISTRIES", wasmInsecureRegistries,
+		"Insecure registries or HTTPS servers for pulling traffic extension modules. Defaults to WASM_INSECURE_REGISTRIES.").Get()
+
+	trafficExtensionModuleExpiry = env.Register("TRAFFIC_EXTENSION_MODULE_EXPIRY", wasmModuleExpiry,
+		"Cache expiration duration for a traffic extension module. Defaults to WASM_MODULE_EXPIRY.").Get()
+
+	trafficExtensionPurgeInterval = env.Register("TRAFFIC_EXTENSION_PURGE_INTERVAL", wasmPurgeInterval,
+		"Interval between checking the expiration of traffic extension modules. Defaults to WASM_PURGE_INTERVAL.").Get()
+
+	trafficExtensionHTTPRequestTimeout = env.Register("TRAFFIC_EXTENSION_HTTP_REQUEST_TIMEOUT", wasmHTTPRequestTimeout,
+		"Timeout per HTTP/HTTPS request for pulling a traffic extension module. Defaults to WASM_HTTP_REQUEST_TIMEOUT.").Get()
+
+	trafficExtensionHTTPRequestMaxRetries = env.Register("TRAFFIC_EXTENSION_HTTP_REQUEST_MAX_RETRIES", wasmHTTPRequestMaxRetries,
+		"Maximum HTTP/HTTPS request retries for pulling a traffic extension module. Defaults to WASM_HTTP_REQUEST_MAX_RETRIES.").Get()
 
 	enableWDSEnv, enableWDSEnvWasSet = env.Register("PEER_METADATA_DISCOVERY", false,
 		"If set to true, enable the peer metadata discovery extension in Envoy").Lookup()

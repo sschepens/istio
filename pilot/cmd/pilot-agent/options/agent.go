@@ -32,8 +32,8 @@ const xdsHeaderPrefix = "XDS_HEADER_"
 
 func NewAgentOptions(proxy *ProxyArgs, cfg *meshconfig.ProxyConfig, sds istioagent.SDSServiceFactory) *istioagent.AgentOptions {
 	var insecureRegistries []string
-	if wasmInsecureRegistries != "" {
-		insecureRegistries = strings.Split(wasmInsecureRegistries, ",")
+	if trafficExtensionInsecureRegistries != "" {
+		insecureRegistries = strings.Split(trafficExtensionInsecureRegistries, ",")
 	}
 	o := &istioagent.AgentOptions{
 		XDSRootCerts:             xdsRootCA,
@@ -45,10 +45,10 @@ func NewAgentOptions(proxy *ProxyArgs, cfg *meshconfig.ProxyConfig, sds istioage
 		EnableDynamicProxyConfig: enableProxyConfigXdsEnv,
 		TrafficExtensionOptions: trafficextensions.Options{
 			InsecureRegistries:    sets.New(insecureRegistries...),
-			ModuleExpiry:          wasmModuleExpiry,
-			PurgeInterval:         wasmPurgeInterval,
-			HTTPRequestTimeout:    wasmHTTPRequestTimeout,
-			HTTPRequestMaxRetries: wasmHTTPRequestMaxRetries,
+			ModuleExpiry:          trafficExtensionModuleExpiry,
+			PurgeInterval:         trafficExtensionPurgeInterval,
+			HTTPRequestTimeout:    trafficExtensionHTTPRequestTimeout,
+			HTTPRequestMaxRetries: trafficExtensionHTTPRequestMaxRetries,
 		},
 		ProxyIPAddresses:              proxy.IPAddresses,
 		ServiceNode:                   proxy.ServiceNode(),
