@@ -15,13 +15,11 @@
 package extension
 
 import (
-	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	wasmextensions "github.com/envoyproxy/go-control-plane/envoy/extensions/wasm/v3"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	extensions "istio.io/api/extensions/v1alpha1"
 	"istio.io/istio/pilot/pkg/model"
@@ -29,7 +27,6 @@ import (
 	"istio.io/istio/pkg/config/xds"
 	"istio.io/istio/pkg/log"
 	pm "istio.io/istio/pkg/model"
-	"istio.io/istio/pkg/util/protomarshal"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -188,25 +185,13 @@ func InsertedTrafficExtensionConfigurations(
 		if filter.GetLua() != nil {
 			continue
 		}
-		// Carry download options in an agent-only envelope. The agent replaces it
-		// with the Envoy filter config after fetching the library and strips credentials.
 		if d := filter.GetDynamicModule(); d != nil {
-			data, err := protomarshal.ToJSON(d)
+			dynamicModuleFilter, err := filter.BuildDynamicModuleFilter(pullSecrets[d.ImagePullSecret])
 			if err != nil {
-				log.Warnf("cannot encode DynamicModule %s: %v", filter.ResourceName, err)
+				log.Warnf("cannot build DynamicModule %s: %v", filter.ResourceName, err)
 				continue
 			}
-			value := &structpb.Struct{}
-			if err := protomarshal.Unmarshal([]byte(data), value); err != nil {
-				continue
-			}
-			if d.ImagePullSecret != "" {
-				value.Fields["imagePullSecret"] = structpb.NewStringValue(string(pullSecrets[d.ImagePullSecret]))
-			}
-			value.Fields["resourceVersion"] = structpb.NewStringValue(filter.ResourceVersion)
-			result = append(result, &core.TypedExtensionConfig{Name: filter.ResourceName, TypedConfig: protoconv.MessageToAny(&udpa.TypedStruct{
-				TypeUrl: pm.DynamicModuleTransportType, Value: value,
-			})})
+			result = append(result, &core.TypedExtensionConfig{Name: filter.ResourceName, TypedConfig: protoconv.MessageToAny(dynamicModuleFilter)})
 			continue
 		}
 		// Build the remaining Wasm configurations.

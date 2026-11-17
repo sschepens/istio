@@ -16,93 +16,77 @@ package trafficextensions
 
 import (
 	"fmt"
-	"net/url"
-	"strings"
 	"time"
 
-	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	dynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/dynamic_modules/v3"
 	httpdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
 	networkdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/dynamic_modules/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/structpb"
 
-	extensions "istio.io/api/extensions/v1alpha1"
 	"istio.io/istio/pkg/model"
-	"istio.io/istio/pkg/util/protomarshal"
 )
 
-// convertDynamicModule consumes the control plane's agent-only download envelope.
+// convertDynamicModule unwraps agent-only fetch options from a standard Envoy filter.
 // Download failures NACK ECDS, preventing Envoy's remote-module fail-open behavior.
 func convertDynamicModule(resource *anypb.Any, cache Cache) (*anypb.Any, bool, error) {
 	ec := &core.TypedExtensionConfig{}
 	if err := resource.UnmarshalTo(ec); err != nil {
 		return nil, false, nil
 	}
-	envelope := &udpa.TypedStruct{}
-	if ec.TypedConfig == nil || !ec.TypedConfig.MessageIs(envelope) {
-		return nil, false, nil
-	}
-	if err := ec.TypedConfig.UnmarshalTo(envelope); err != nil {
-		return nil, true, err
-	}
-	if envelope.TypeUrl != model.DynamicModuleTransportType {
-		return nil, false, nil
-	}
-	if envelope.Value == nil {
-		return nil, true, fmt.Errorf("missing dynamic module config")
-	}
-	version := envelope.Value.Fields["resourceVersion"].GetStringValue()
-	delete(envelope.Value.Fields, "resourceVersion")
-	data, err := protomarshal.ToJSON(envelope.Value)
-	if err != nil {
-		return nil, true, err
-	}
-	cfg := &extensions.DynamicModuleConfig{}
-	if err := protomarshal.Unmarshal([]byte(data), cfg); err != nil {
-		return nil, true, err
-	}
-	moduleURL := cfg.Url
-	if !strings.Contains(moduleURL, "://") {
-		moduleURL = "oci://" + moduleURL
-	}
-	u, err := url.Parse(moduleURL)
-	if err != nil {
-		return nil, true, err
-	}
-	path := strings.TrimPrefix(moduleURL, "file://")
-	if u.Scheme != "file" {
-		var secret []byte
-		if v, found := envelope.Value.Fields["imagePullSecret"]; found {
-			if v.GetStringValue() == "" {
-				return nil, true, fmt.Errorf("missing dynamic module image pull secret")
-			}
-			secret = []byte(v.GetStringValue())
+	var filter proto.Message
+	var module *dynamic.DynamicModuleConfig
+	var filterConfig **anypb.Any
+	switch ec.GetTypedConfig().GetTypeUrl() {
+	case model.DynamicModuleHTTPFilterType:
+		cfg := &httpdynamic.DynamicModuleFilter{}
+		if err := ec.TypedConfig.UnmarshalTo(cfg); err != nil {
+			return nil, true, err
 		}
-		path, err = cache.Get(moduleURL, GetOptions{DynamicModule: true, Checksum: cfg.Sha256,
-			ResourceName: ec.Name, ResourceVersion: version, RequestTimeout: 30 * time.Second,
-			PullSecret: secret, PullPolicy: PullPolicy(cfg.ImagePullPolicy)})
+		filter, module, filterConfig = cfg, cfg.DynamicModuleConfig, &cfg.FilterConfig
+	case model.DynamicModuleNetworkFilterType:
+		cfg := &networkdynamic.DynamicModuleNetworkFilter{}
+		if err := ec.TypedConfig.UnmarshalTo(cfg); err != nil {
+			return nil, true, err
+		}
+		filter, module, filterConfig = cfg, cfg.DynamicModuleConfig, &cfg.FilterConfig
+	default:
+		return nil, false, nil
+	}
+	envelope, err := model.UnmarshalDynamicModuleConfigEnvelope(*filterConfig)
+	if err != nil {
+		return nil, true, err
+	}
+	if envelope == nil {
+		return nil, false, nil
+	}
+	source := module.GetModule()
+	if remote := source.GetRemote(); remote != nil {
+		uri := remote.GetHttpUri()
+		if uri == nil || uri.Uri == "" {
+			return nil, true, fmt.Errorf("missing dynamic module remote URI")
+		}
+		if envelope.PullSecretRequired && len(envelope.PullSecret) == 0 {
+			return nil, true, fmt.Errorf("missing dynamic module image pull secret")
+		}
+		timeout := 30 * time.Second
+		if uri.Timeout != nil {
+			timeout = uri.Timeout.AsDuration()
+		}
+		path, err := cache.Get(uri.Uri, GetOptions{DynamicModule: true, Checksum: remote.Sha256,
+			ResourceName: ec.Name, ResourceVersion: envelope.ResourceVersion, RequestTimeout: timeout,
+			PullSecret: envelope.PullSecret, PullPolicy: PullPolicy(envelope.PullPolicy)})
 		if err != nil {
-			return nil, true, fmt.Errorf("cannot fetch dynamic module %s: %w", moduleURL, err)
+			return nil, true, fmt.Errorf("cannot fetch dynamic module %s: %w", uri.Uri, err)
 		}
+		module.Module = &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{
+			Local: &core.DataSource{Specifier: &core.DataSource_Filename{Filename: path}},
+		}}
+	} else if source.GetLocal().GetFilename() == "" {
+		return nil, true, fmt.Errorf("missing dynamic module source")
 	}
-	module := &dynamic.DynamicModuleConfig{Module: &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{
-		Local: &core.DataSource{Specifier: &core.DataSource_Filename{Filename: path}},
-	}}}
-	config := cfg.PluginConfig
-	if config == nil {
-		config = &structpb.Struct{}
-	}
-	pluginConfig, err := anypb.New(config)
-	if err != nil {
-		return nil, true, err
-	}
-	var filter proto.Message = &httpdynamic.DynamicModuleFilter{DynamicModuleConfig: module, FilterName: cfg.PluginName, FilterConfig: pluginConfig}
-	if cfg.Type == extensions.PluginType_NETWORK {
-		filter = &networkdynamic.DynamicModuleNetworkFilter{DynamicModuleConfig: module, FilterName: cfg.PluginName, FilterConfig: pluginConfig}
-	}
+	*filterConfig = envelope.FilterConfig
 	ec.TypedConfig, err = anypb.New(filter)
 	if err != nil {
 		return nil, true, err

@@ -31,8 +31,8 @@ import (
 	"testing"
 	"time"
 
-	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	dynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/dynamic_modules/v3"
 	httpdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
 	networkdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/dynamic_modules/v3"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -42,9 +42,11 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	extensions "istio.io/api/extensions/v1alpha1"
 	"istio.io/istio/pkg/model"
 )
 
@@ -168,10 +170,20 @@ func (*dynamicModuleCache) Cleanup() {}
 func TestDynamicModuleConversion(t *testing.T) {
 	for _, typ := range []string{"HTTP", "NETWORK"} {
 		t.Run(typ, func(t *testing.T) {
-			value, _ := structpb.NewStruct(map[string]any{"url": "registry/module:v1", "pluginName": "test", "type": typ,
-				"imagePullSecret": "secret", "imagePullPolicy": "Always", "resourceVersion": "42", "pluginConfig": map[string]any{"key": "value"}})
-			envelope, _ := anypb.New(&udpa.TypedStruct{TypeUrl: model.DynamicModuleTransportType, Value: value})
-			resource, _ := anypb.New(&core.TypedExtensionConfig{Name: "test", TypedConfig: envelope})
+			pluginConfig, _ := structpb.NewStruct(map[string]any{"key": "value"})
+			filterConfig, err := anypb.New(pluginConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope, err := (&model.DynamicModuleConfigEnvelope{FilterConfig: filterConfig, PullSecret: []byte("secret"),
+				PullSecretRequired: true, PullPolicy: extensions.PullPolicy_Always, ResourceVersion: "42"}).ToAny()
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{
+				HttpUri: &core.HttpUri{Uri: "oci://registry/module:v1"}, Sha256: "checksum",
+			}}}
+			resource := dynamicModuleResource(t, typ == "NETWORK", source, envelope)
 			cache := &dynamicModuleCache{}
 			resources := []*anypb.Any{resource}
 			if err := MaybeConvertExtensionConfig(resources, cache); err != nil {
@@ -184,10 +196,22 @@ func TestDynamicModuleConversion(t *testing.T) {
 			if err := resources[0].UnmarshalTo(ec); err != nil {
 				t.Fatal(err)
 			}
+			if cache.opts.Checksum != "checksum" {
+				t.Fatal("checksum not forwarded")
+			}
+			if bytes.Contains(resources[0].Value, []byte("secret")) {
+				t.Fatal("credentials leaked to Envoy")
+			}
 			if typ == "HTTP" {
 				f := &httpdynamic.DynamicModuleFilter{}
 				if err := ec.TypedConfig.UnmarshalTo(f); err != nil {
 					t.Fatal(err)
+				}
+				if !proto.Equal(f.FilterConfig, filterConfig) {
+					t.Fatal("plugin config not restored")
+				}
+				if !f.GetDynamicModuleConfig().DoNotClose || f.GetDynamicModuleConfig().MetricsNamespace != "test" {
+					t.Fatal("module options changed")
 				}
 				if f.GetDynamicModuleConfig().GetModule().GetLocal().GetFilename() != "/cache/module.so" || f.FilterName != "test" {
 					t.Fatal(f)
@@ -196,6 +220,12 @@ func TestDynamicModuleConversion(t *testing.T) {
 				f := &networkdynamic.DynamicModuleNetworkFilter{}
 				if err := ec.TypedConfig.UnmarshalTo(f); err != nil {
 					t.Fatal(err)
+				}
+				if !proto.Equal(f.FilterConfig, filterConfig) {
+					t.Fatal("plugin config not restored")
+				}
+				if !f.GetDynamicModuleConfig().DoNotClose || f.GetDynamicModuleConfig().MetricsNamespace != "test" {
+					t.Fatal("module options changed")
 				}
 				if f.GetDynamicModuleConfig().GetModule().GetLocal().GetFilename() != "/cache/module.so" {
 					t.Fatal(f)
@@ -232,12 +262,21 @@ func TestDynamicModuleLocalAndMissingSecret(t *testing.T) {
 		{"file:///opt/filters/module.so", false, false},
 		{"oci://registry/module:v1", true, true},
 	} {
-		value, _ := structpb.NewStruct(map[string]any{"url": tc.url})
-		if tc.secret {
-			value.Fields["imagePullSecret"] = structpb.NewStringValue("")
+		filterConfig, err := anypb.New(&structpb.Struct{})
+		if err != nil {
+			t.Fatal(err)
 		}
-		envelope, _ := anypb.New(&udpa.TypedStruct{TypeUrl: model.DynamicModuleTransportType, Value: value})
-		resource, _ := anypb.New(&core.TypedExtensionConfig{Name: "test", TypedConfig: envelope})
+		envelope, err := (&model.DynamicModuleConfigEnvelope{FilterConfig: filterConfig, PullSecretRequired: tc.secret}).ToAny()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var source *core.AsyncDataSource
+		if tc.secret {
+			source = &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{HttpUri: &core.HttpUri{Uri: tc.url}}}}
+		} else {
+			source = &core.AsyncDataSource{Specifier: &core.AsyncDataSource_Local{Local: &core.DataSource{Specifier: &core.DataSource_Filename{Filename: "/opt/filters/module.so"}}}}
+		}
+		resource := dynamicModuleResource(t, false, source, envelope)
 		cache := &dynamicModuleCache{}
 		converted, handled, err := convertDynamicModule(resource, cache)
 		if !handled || (err != nil) != tc.wantErr {
@@ -310,5 +349,63 @@ func TestDynamicModuleHTTPCache(t *testing.T) {
 	binary.LittleEndian.PutUint16(b[18:], uint16(other))
 	if isValidDynamicModule(b) {
 		t.Fatal("accepted foreign architecture ELF")
+	}
+}
+
+func dynamicModuleResource(t *testing.T, network bool, source *core.AsyncDataSource, filterConfig *anypb.Any) *anypb.Any {
+	t.Helper()
+	module := &dynamic.DynamicModuleConfig{Module: source, DoNotClose: true, MetricsNamespace: "test"}
+	var filter proto.Message = &httpdynamic.DynamicModuleFilter{DynamicModuleConfig: module, FilterName: "test", FilterConfig: filterConfig}
+	if network {
+		filter = &networkdynamic.DynamicModuleNetworkFilter{DynamicModuleConfig: module, FilterName: "test", FilterConfig: filterConfig}
+	}
+	config, err := anypb.New(filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := anypb.New(&core.TypedExtensionConfig{Name: "test", TypedConfig: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resource
+}
+
+func TestDynamicModuleWithoutEnvelope(t *testing.T) {
+	config, err := anypb.New(&structpb.Struct{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, network := range []bool{false, true} {
+		resource := dynamicModuleResource(t, network, nil, config)
+		resources := []*anypb.Any{resource}
+		cache := &dynamicModuleCache{}
+		if err := MaybeConvertExtensionConfig(resources, cache); err != nil {
+			t.Fatal(err)
+		}
+		if !proto.Equal(resources[0], resource) || cache.url != "" {
+			t.Fatal("unwrapped filter was modified")
+		}
+	}
+}
+
+func TestDynamicModuleMissingSource(t *testing.T) {
+	config, err := anypb.New(&structpb.Struct{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := (&model.DynamicModuleConfigEnvelope{FilterConfig: config}).ToAny()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []*core.AsyncDataSource{
+		nil,
+		{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{}}},
+		{Specifier: &core.AsyncDataSource_Remote{Remote: &core.RemoteDataSource{HttpUri: &core.HttpUri{}}}},
+		{Specifier: &core.AsyncDataSource_Local{Local: &core.DataSource{}}},
+	} {
+		resource := dynamicModuleResource(t, false, source, envelope)
+		if _, handled, err := convertDynamicModule(resource, &dynamicModuleCache{}); !handled || err == nil {
+			t.Fatalf("expected invalid-source error, got handled=%v, err=%v", handled, err)
+		}
 	}
 }

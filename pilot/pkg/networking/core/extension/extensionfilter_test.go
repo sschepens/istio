@@ -15,13 +15,16 @@
 package extension
 
 import (
+	"strings"
 	"testing"
 
-	udpa "github.com/cncf/xds/go/udpa/type/v1"
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	httpdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/dynamic_modules/v3"
 	lua "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/lua/v3"
+	networkdynamic "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/dynamic_modules/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	extensions "istio.io/api/extensions/v1alpha1"
@@ -900,22 +903,61 @@ func TestMixedWasmLuaPriorityOrdering_PreservesSortedOrder(t *testing.T) {
 }
 
 func TestDynamicModuleECDS(t *testing.T) {
-	filter := &model.TrafficExtensionWrapper{ResourceName: "native", ResourceVersion: "42", TrafficExtension: &extensions.TrafficExtension{
-		FilterConfig: &extensions.TrafficExtension_DynamicModule{DynamicModule: &extensions.DynamicModuleConfig{Url: "oci://registry/native:v1", ImagePullSecret: "kubernetes://ns/pull"}},
-	}}
-	http := toEnvoyHTTPTrafficExtension(filter)
-	network := toEnvoyNetworkTrafficExtension(filter)
-	assert.Equal(t, http.GetConfigDiscovery().TypeUrls, []string{pm.DynamicModuleHTTPFilterType})
-	assert.Equal(t, network.GetConfigDiscovery().TypeUrls, []string{pm.DynamicModuleNetworkFilterType})
-	configs := InsertedTrafficExtensionConfigurations([]*model.TrafficExtensionWrapper{filter}, []string{"native"}, map[string][]byte{"kubernetes://ns/pull": []byte("secret")})
-	if len(configs) != 1 {
-		t.Fatal(configs)
+	for _, typ := range []extensions.PluginType{extensions.PluginType_UNSPECIFIED_PLUGIN_TYPE, extensions.PluginType_HTTP, extensions.PluginType_NETWORK} {
+		for _, moduleURL := range []string{"oci://registry/native:v1", "registry:5000/native:v1", "file:///opt/filters/native.so"} {
+			t.Run(typ.String()+"/"+moduleURL, func(t *testing.T) {
+				filter := &model.TrafficExtensionWrapper{ResourceName: "native", ResourceVersion: "42", TrafficExtension: &extensions.TrafficExtension{
+					FilterConfig: &extensions.TrafficExtension_DynamicModule{DynamicModule: &extensions.DynamicModuleConfig{
+						Url: moduleURL, Sha256: "checksum", ImagePullSecret: "kubernetes://ns/pull", Type: typ,
+					}},
+				}}
+				http := toEnvoyHTTPTrafficExtension(filter)
+				network := toEnvoyNetworkTrafficExtension(filter)
+				assert.Equal(t, http.GetConfigDiscovery().TypeUrls, []string{pm.DynamicModuleHTTPFilterType})
+				assert.Equal(t, network.GetConfigDiscovery().TypeUrls, []string{pm.DynamicModuleNetworkFilterType})
+				configs := InsertedTrafficExtensionConfigurations([]*model.TrafficExtensionWrapper{filter}, []string{"native"}, map[string][]byte{"kubernetes://ns/pull": []byte("secret")})
+				if len(configs) != 1 {
+					t.Fatal(configs)
+				}
+				var wrappedConfig *anypb.Any
+				var source *core.AsyncDataSource
+				if typ == extensions.PluginType_NETWORK {
+					cfg := &networkdynamic.DynamicModuleNetworkFilter{}
+					if err := configs[0].TypedConfig.UnmarshalTo(cfg); err != nil {
+						t.Fatal(err)
+					}
+					wrappedConfig, source = cfg.FilterConfig, cfg.GetDynamicModuleConfig().GetModule()
+				} else {
+					cfg := &httpdynamic.DynamicModuleFilter{}
+					if err := configs[0].TypedConfig.UnmarshalTo(cfg); err != nil {
+						t.Fatal(err)
+					}
+					wrappedConfig, source = cfg.FilterConfig, cfg.GetDynamicModuleConfig().GetModule()
+				}
+				if strings.HasPrefix(moduleURL, "file://") {
+					assert.Equal(t, source.GetLocal().GetFilename(), "/opt/filters/native.so")
+				} else {
+					expectedURL := moduleURL
+					if !strings.Contains(expectedURL, "://") {
+						expectedURL = "oci://" + expectedURL
+					}
+					assert.Equal(t, source.GetRemote().GetHttpUri().GetUri(), expectedURL)
+					assert.Equal(t, source.GetRemote().GetSha256(), "checksum")
+				}
+				envelope, err := pm.UnmarshalDynamicModuleConfigEnvelope(wrappedConfig)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if envelope == nil {
+					t.Fatal("missing DynamicModule envelope")
+				}
+				assert.Equal(t, string(envelope.PullSecret), "secret")
+				assert.Equal(t, envelope.ResourceVersion, "42")
+				assert.Equal(t, envelope.PullSecretRequired, true)
+				if envelope.FilterConfig == nil {
+					t.Fatal("missing plugin config")
+				}
+			})
+		}
 	}
-	envelope := &udpa.TypedStruct{}
-	if err := configs[0].TypedConfig.UnmarshalTo(envelope); err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, envelope.TypeUrl, pm.DynamicModuleTransportType)
-	assert.Equal(t, envelope.Value.Fields["imagePullSecret"].GetStringValue(), "secret")
-	assert.Equal(t, envelope.Value.Fields["resourceVersion"].GetStringValue(), "42")
 }
